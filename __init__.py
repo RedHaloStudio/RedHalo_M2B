@@ -10,6 +10,7 @@ bl_info = {
     "category": "Tools"
  }
 
+from math import pi
 import bpy
 import bpy_extras
 from bpy.types import Operator 
@@ -435,6 +436,9 @@ class Tools_OT_Max2Blender(Operator):
     bl_options = {'REGISTER', 'UNDO'} 
 
     def execute(self, context): 
+        MTLFile = tempfile.gettempdir() + "\\RH_M2B.xml"
+        xml_file = xml.parse(MTLFile)
+        xml_root = xml_file.getroot()
 
         # 加载模型
         print("加载模型Loading...")
@@ -444,15 +448,75 @@ class Tools_OT_Max2Blender(Operator):
 
         print("模型加载完成 Ended")
 
+        # 设置场景
+        renderWidth = float(xml_root.find("./Setting/Width").text)
+        renderHeight = float(xml_root.find("./Setting/Height").text)
+        bpy.context.scene.render.resolution_x = renderWidth
+        bpy.context.scene.render.resolution_y = renderHeight
+
         # 设置相机
+        camera_xml = xml_root.find("./CameraList")
+        for c in camera_xml.findall("./*") :
+            camera_name = c.attrib["name"]
+            camera_matrix = ConvertMatrix(c.attrib["matrix"])
+            camera_fov = c.attrib["fov"]
+            # camera_near = c.attrib["near"]
+            # camera_far = c.attrib["far"]
+
+            camera_data = bpy.data.cameras.new(name='Camera')
+            camera_object = bpy.data.objects.new(camera_name, camera_data)
+            bpy.context.scene.collection.objects.link(camera_object)
+            camera_object.data.angle = float(camera_fov)/180 * pi
+            camera_object.matrix_world = camera_matrix
+
+        # 设置灯光
+        print("加载灯光设置 Loading...")
+        light_xml = xml_root.find("./LightList")
+        # c = light_xml.getchildren()
+        for x in light_xml.findall("./*"):
+            light_name = x.attrib["name"]
+            matrix = ConvertMatrix(x.attrib["matrix"])
+
+            L_Type = x.attrib["type"]
+
+            if L_Type in ("AREA", "DISK"):
+                light_data = bpy.data.lights.new(name="Light", type = "AREA")
+            else:
+                light_data = bpy.data.lights.new(name="Light", type = L_Type)
+
+            light_obj = bpy.data.objects.new(light_name, light_data)
+            light_obj.data.energy = float(x.attrib["multiplier"])
+            color = ConvertColor(x.attrib["color"])
+            light_obj.data.color = color[:-1]
+            if L_Type == "POINT":
+                light_obj.data.shadow_soft_size = float(x.attrib["length"])
+            elif L_Type == "AREA":
+                light_obj.data.shape = 'RECTANGLE'
+                light_obj.data.size = float(x.attrib["length"])
+                light_obj.data.size_y = float(x.attrib["width"])
+                light_obj.data.cycles.is_portal = True if x.attrib["portal"] == "true" else False
+            elif L_Type == "DISK":
+                light_obj.data.shape = 'DISK'
+                light_obj.data.size = float(x.attrib["length"])
+                light_obj.data.size_y = float(x.attrib["width"])
+                light_obj.data.cycles.is_portal = True if x.attrib["portal"] == "true" else False
+            elif L_Type == "SUN":
+                light_obj.data.angle = 0.01
+
+            bpy.context.scene.collection.objects.link(light_obj)
+
+            light_obj.matrix_world = matrix
+
+            light_obj.visible_camera = True if x.attrib["invisible"] == "true" else False
+            light_obj.visible_diffuse = True if x.attrib["affectdiffuse"] == "true" else False
+            light_obj.visible_glossy = True if x.attrib["affectspecular"] == "true" else False
+            light_obj.visible_transmission = True if x.attrib["affectreflections"] == "true" else False
+
+        print("灯光设置完毕 Ended")
 
         # 设置材质
         print("加载材质 Loading... ")
         SceneMaterials = [ m for m in bpy.data.materials[:] if not m.is_grease_pencil]
-        MTLFile = tempfile.gettempdir() + "\\RH_M2B.xml"
-        xml_file = xml.parse(MTLFile)
-        xml_root = xml_file.getroot()
-
         m_mat = xml_root.find("./MaterialList/")
 
         for mat in SceneMaterials:

@@ -5,17 +5,35 @@
  * @Last Modified time: 2022-01-15 21:45:52
  */
 
+/*------------------------------------------------------
+--------------------- GLOBAL VARS ----------------------
+------------------------------------------------------*/
+
 --Load the xml assembly
 dotNet.loadAssembly "system.xml"
 --Create an xml document object.
-global xmlDoc = dotNetObject "system.xml.xmlDocument"
+xmlDoc = dotNetObject "system.xml.xmlDocument"
 -- Create a root element for the xml doc and add it to the xmlDocument.
 root = xmlDoc.createElement "RedHalo_Max_to_Blender_Convert"
 xmlDoc.appendChild root
 
-/*------------------------------------------------------
---------------------- GLOBAL VARS ----------------------
-------------------------------------------------------*/
+-- Global Setting
+SettingElement = xmlDoc.CreateElement "Setting"
+root.appendChild SettingElement
+
+-- NodeListElement = xmlDoc.createElement "NodeList"
+-- root.appendChild NodeListElement
+
+CameraListElement = xmlDoc.createElement "CameraList"
+root.appendChild CameraListElement
+
+LightListElement = xmlDoc.createElement "LightList"
+root.appendChild LightListElement
+
+MaterialList = xmlDoc.createElement "MaterialList"
+root.appendChild MaterialList
+
+
 Material_List = #()
 
 CR_DiffuseProps = #("colordiffuse", "texmapDiffuse")
@@ -584,6 +602,131 @@ fn MakeUniqueMaterialName =(
 )
 --处理重名材质结束
 -----------------------
+fn ExportSetting ParentNode = (
+
+    RenderElement = xmlDoc.CreateElement "Renderer"
+    ParentNode.appendChild RenderElement
+    RenderElement.innerText = (filterString (renderers.current as string) ":")[1]
+
+    GammaElement = xmlDoc.CreateElement "Gamma"
+    ParentNode.appendChild GammaElement
+    GammaElement.innerText = FileInGamma as string
+
+    WidthElement = xmlDoc.CreateElement "Width"
+    ParentNode.appendChild WidthElement
+    WidthElement.innerText = renderWidth as string
+
+    HeightElement = xmlDoc.CreateElement "Height"
+    ParentNode.appendChild HeightElement
+    HeightElement.innerText = renderHeight as string
+)
+
+fn ExportLight ParentNode = (
+    -- Lights List
+    L_Color = ""
+    L_Multiplier = ""
+    L_Type = "AREA"
+    L_Length = 0.1
+    L_Width = 0.1
+    L_IES = "undefined"
+    L_Invisible = false
+    L_Shadow = true
+    L_Diffuse = true
+    L_Specular = true
+    L_Reflection = true
+    L_Portal = false
+
+    for i in Lights do (
+        
+        LightType = classof i
+        if LightType != TargetObject do (
+            case LightType of (
+                VRayLight:(
+                    L_Color = i.color
+                    L_Multiplier = i.multiplier
+
+                    case i.type of (
+                        0: L_type = "AREA"
+                        2: L_Type = "POINT"
+                        4: L_Type = "DISK"
+                    )
+
+                    L_Length = i.sizeLength
+                    L_Width = i.sizeWidth
+                    L_Invisible = i.invisible
+                    L_Shadow = i.castshadows
+                    L_Diffuse = i.affect_diffuse
+                    L_Specular = i.affect_specular
+                    L_Reflection = i.affect_reflections
+                    L_Portal = i.SkylightPortal
+                )
+                VRayIES: (
+                    L_Color = i.color
+                    L_Multiplier = i.power
+                    L_Type = "POINT"
+                    L_Length = 0.1
+                    L_Width = 0.1
+                    L_IES = i.ies_file
+                    L_Invisible = ""
+                    L_Diffuse = i.affect_diffuse
+                    L_Shadow = i.cast_shadows
+                    L_Specular = i.affect_specular
+                    L_Reflections = true
+                    L_Portal = false                     
+                )
+                VRaySun:(
+                    L_Color = i.filter_Color
+                    L_Multiplier = i.intensity_multiplier
+                    L_type = "SUN"
+                    L_Length = i.size_multiplier
+                    L_Width = "0.1"
+                    L_Invisible = i.invisible
+                    L_Shadow = "true"
+                    L_Diffuse = i.affect_diffuse
+                    L_Specular = i.affect_specular
+                    L_Reflection = "false"
+                    L_Portal = "false"
+                )
+            )
+
+            LightsList = xmlDoc.CreateElement "Light"
+            ParentNode.appendChild LightsList
+
+            LightsList.setAttribute "name" i.name
+            LightsList.setAttribute "matrix" (i.transform as string)
+            LightsList.setAttribute "color" (L_Color as string)
+            LightsList.setAttribute "multiplier" (L_Multiplier as string)
+            LightsList.setAttribute "type" L_Type
+            LightsList.setAttribute "length" (L_Length as string)
+            LightsList.setAttribute "width" (L_Width as string)
+            LightsList.setAttribute "IES" L_IES
+            LightsList.setAttribute "caseshadows" (L_Shadow as string)
+            LightsList.setAttribute "invisible" (L_Invisible as string)
+            LightsList.setAttribute "affectdiffuse" (L_Diffuse as string)
+            LightsList.setAttribute "affectspecular" (L_Specular as string)
+            LightsList.setAttribute "affectreflections" (L_Reflections as string)
+            LightsList.setAttribute "portal" (L_Portal as string)
+        )
+    )
+            
+)
+
+fn ExportCamera ParenNode = (
+    -- Camera List
+    for i in Cameras do (
+        if classof i != TargetObject do (
+            name = i.name
+            fov = i.fov as string
+            matrix = i.transform
+
+            cameraList = xmlDoc.createElement "Camera"
+            cameraList.setAttribute "name" name
+            cameraList.setAttribute "fov" fov
+            cameraList.setAttribute "matrix" (matrix as string)
+            ParenNode.appendChild cameraList
+        )
+    )
+)
 
 /*-------------------------------------
 ---------- FUNCTION END ---------------
@@ -619,8 +762,8 @@ rollout M2B "Export Blender"
     -- checkbutton cb_m_fbx_ConvertUnit "Convert Unit" checked:true height:20 width:170 pos:[15, 180] enabled:false 
     
     groupbox gb3 "导出文件位置" width:190 height:40 pos:[5, 160]
-    edittext et_file "" width:165 pos:[5, 182]
-    button btn_file "..." width:20 height:20 pos:[170, 180]
+    edittext et_folder "" width:165 pos:[5, 182]
+    button btn_folder "..." width:20 height:20 pos:[170, 180]
 
     button btn_export "导出" width:155 height:30 pos:[10,210]
     button btn_about "?" width:30 height:30 pos:[165, 210]
@@ -628,71 +771,27 @@ rollout M2B "Export Blender"
     label lbl_right "(C)RedHalo Studio 发霉的红地蛋"
 
     on btn_about pressed do (
-        messageBox "此版本编译于2022-01-14\n此版本限制：仅支持Vray英文版，不支持汉化版本\n其它材质不会导出，因此Blender加载后为空白节点\n支持材质类型：VrayMtl(Vray标准材质), Vray双面材质\n支持纹理类型: 标准贴图，平铺"
+        messageBox "此版本编译于2022-01-16\n此版本限制：仅支持Vray英文版，不支持汉化版本\n其它材质不会导出，因此Blender加载后为空白节点\n支持材质类型：VrayMtl(Vray标准材质), Vray双面材质\n支持纹理类型: 标准贴图，平铺"
+    )
+
+    on btn_folder pressed do (
+        folder = getSavepath()
+        if folder != undefined do et_folder.text = folder
+
+        -- 写入注册表
+        --计算机\HKEY_CURRENT_USER\SOFTWARE\3DtoAll
+        --registry.createKey <HKey> <string subKeyName> accessRights:<{#readOnly|#writeOnly|#all| <int>}> newKeyCreated:<&bool>Key:<&HKey>volatile:<bool> 
+        registry.createKey HKEY_CURRENT_USER "SOFTWARE\\REDHALO" accessRights:#all newKeyCreated:&newKeyCreated key:&key1
+        registry.setValue HKEY_CURRENT_USER "SOFTWARE\\REDHALO" #REG_SZ "path"
     )
 
     on btn_export pressed do (
-        -- Global Setting
-        SettingElement = xmlDoc.CreateElement "Setting"
-        root.appendChild SettingElement
 
-        RenderElement = xmlDoc.CreateElement "Renderer"
-        SettingElement.appendChild RenderElement
-        RenderElement.innerText = (filterString (renderers.current as string) ":")[1]
+        ExportSetting SettingElement
 
-        GammaElement = xmlDoc.CreateElement "Gamma"
-        SettingElement.appendChild GammaElement
-        GammaElement.innerText = FileInGamma as string
+        ExportLight LightListElement
 
-        WidthElement = xmlDoc.CreateElement "Width"
-        SettingElement.appendChild WidthElement
-        WidthElement.innerText = renderWidth as string
-
-        HeightElement = xmlDoc.CreateElement "Height"
-        SettingElement.appendChild HeightElement
-        HeightElement.innerText = renderHeight as string
-
-        -- NodeListElement = xmlDoc.createElement "NodeList"
-        -- root.appendChild NodeListElement
-
-        CameraListElement = xmlDoc.createElement "CameraList"
-        root.appendChild CameraListElement
-
-        LightListElement = xmlDoc.createElement "LightList"
-        root.appendChild LightListElement
-
-        MaterialList = xmlDoc.createElement "MaterialList"
-        root.appendChild MaterialList
-
-        -- Lights List
-        for i in Lights do (
-            if classof i != Targetobject do (
-                name = i.name
-                matrix = i.transform
-
-                LightsList = xmlDoc.CreateElement "Light"
-                LightsList.setAttribute "name" name
-                LightsList.setAttribute "matrix" (matrix as string)
-                LightsList.setAttribute "type" "type"
-
-                LightListElement.appendChild LightsList
-            )
-        )
-
-        -- Camera List
-        for i in Cameras do (
-            if classof i != TargetObject do (
-                name = i.name
-                fov = i.fov as string
-                matrix = i.transform
-
-                cameraList = xmlDoc.createElement "Camera"
-                cameraList.setAttribute "name" name
-                cameraList.setAttribute "fov" fov
-                cameraList.setAttribute "matrix" (matrix as string)
-                CameraListElement.appendChild cameraList
-            )
-        )
+        ExportCamera CameraListElement
 
         for i in sceneMaterials do (
             ChangeMtlType i
