@@ -1,8 +1,8 @@
 ﻿/*
  * @Author: RedHalo Studio 
- * @Date: 2022-01-15 16:47:04 
+ * @Date: 2022-01-19 22:19:19 
  * @Last Modified by: RedHaloStudio
- * @Last Modified time: 2022-01-15 21:45:52
+ * @Last Modified time: 2022-01-19 22:32:25
  */
 
 /*------------------------------------------------------
@@ -13,26 +13,29 @@
 dotNet.loadAssembly "system.xml"
 --Create an xml document object.
 xmlDoc = dotNetObject "system.xml.xmlDocument"
--- Create a root element for the xml doc and add it to the xmlDocument.
-root = xmlDoc.createElement "RedHalo_Max_to_Blender_Convert"
-xmlDoc.appendChild root
 
--- Global Setting
-SettingElement = xmlDoc.CreateElement "Setting"
-root.appendChild SettingElement
+--fn CreateXML = (
+    -- Create a root element for the xml doc and add it to the xmlDocument.
+    root = xmlDoc.createElement "RedHalo_Max_to_Blender_Convert"
 
--- NodeListElement = xmlDoc.createElement "NodeList"
--- root.appendChild NodeListElement
+    xmlDoc.appendChild root
 
-CameraListElement = xmlDoc.createElement "CameraList"
-root.appendChild CameraListElement
+    -- Global Setting
+    SettingElement = xmlDoc.CreateElement "Setting"
+    root.appendChild SettingElement
 
-LightListElement = xmlDoc.createElement "LightList"
-root.appendChild LightListElement
+    -- NodeListElement = xmlDoc.createElement "NodeList"
+    -- root.appendChild NodeListElement
 
-MaterialList = xmlDoc.createElement "MaterialList"
-root.appendChild MaterialList
+    CameraListElement = xmlDoc.createElement "CameraList"
+    root.appendChild CameraListElement
 
+    LightListElement = xmlDoc.createElement "LightList"
+    root.appendChild LightListElement
+
+    MaterialList = xmlDoc.createElement "MaterialList"
+    root.appendChild MaterialList
+--)
 
 Material_List = #()
 
@@ -105,44 +108,68 @@ NodePropsArray = #(DiffuseProps, MetallicProps, ReflectProps, RoughnessProps, An
 -- NodePropsArray = #(DiffuseProps)
 AttribsArray = #(DiffuseAttrib, MetallicAttrib, ReflectAttrib, RoughnessAttrib, AnisotropyAttrib, AnisotropyRotationAttrib, SheenAttrib, CoatAttrib, CoatRoughnessAttrib, IORAttrib, RefractAttrib, RefractRoughnessAttrib, EmissionAttrib, EmissionStrengthAttrib, OpacityAttrib, BumpAttrib, TranslucentAttrib, DisplacementAttrib)
 
-
-/*-- 可以转换的纹理类型
-Bitmaptexture
-Bricks
-Checker
-Color_Correction
-Mix
-RGB_Multiply
-BerconTile
-CompositeTexturemap
------------------*/
-
 /*------------------------------------------------------
 --------------------------------------------------------
 ------------------------------------------------------*/
+fn rescaleObjects = (
+    scaleFac = 1
+    case units.SystemType of (
+        #Inches:scaleFac = 0.0253999998
+        #Feet:scaleFac = 0.304799998
+        #Miles:scaleFac = 1609.3439893783
+        #Millimeters:scaleFac = 0.001
+        #Centimeters:scaleFac = 0.01
+        #Meters:scaleFac = 1
+        #Kilometers:scaleFac = 1000
+    )
 
-/*
--- Object List
-for i in geometry do (
-    name = i.name
-    
-    visible_camera = i.primaryVisibility
-    visible_reflect = i.secondaryVisibility
-    visible_refract = i.secondaryVisibility
-    visible_shadow = i.castShadows
-    
-    objectList = xmlDoc.createElement "Node"
-    objectList.setAttribute "name" name
-    objectList.setAttribute "visible_camera" "1"
-    objectList.setAttribute "visible_refect" "1"
-    objectList.setAttribute "visible_refract" "1"
-    objectList.setAttribute "visible_shadow" "1"
-
-    NodeListElement.appendChild objectList
+    if units.SystemType != #Meters do (
+        units.SystemType = #Meters
+        RescaleWorldUnits scaleFac
+    )
 )
-*/
 
 ---------Function BEGIN------------
+function fbxtext2Hex s =
+(
+	local ch = "abcdefghijklmnopqrstuvwxyz123456789_ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	local hex = ""
+	for i=1 to s.count do
+		if (findString ch s[i] == undefined) then
+			hex += "FBXASC0"+(bit.charAsInt s[i]) as string
+		else
+			hex += s[i]	
+	return hex
+)
+
+fn FixDuplicatName array obj =(
+    if appendIfUnique array obj.name == false then (
+        newname = obj.name + "_" + timeStamp() as string
+		obj.name = newname
+        FixDuplicatName array obj
+    )
+)
+
+fn DuplicateObjectNam = (
+    FixObjNames = #() 
+    for i in objects do (
+        FixDuplicatName FixObjNames i
+    )
+)
+-------------------------
+--- 处理重名材质名字
+--- Unique Material Name
+fn MakeUniqueMaterialName =(
+    AllMaterialName = #()
+    for cls in material.classes do (
+        for i in getClassInstances cls do (
+            FixDuplicatName AllMaterialName i
+        )
+    )
+)
+--处理重名材质结束
+-----------------------
+
 
 fn ConvertGamma acolor gamma = (
     r = (acolor.r / 255.0) ^ gamma * 255
@@ -165,138 +192,245 @@ fn CleanMeditSlot =
     )
 )
 
-fn ChangeMtlType mat = (
-    matType = classof mat
-    case matType of (
-        VRayOverrideMtl:(
-            _t = mat.baseMtl
-            replaceinstances mat _t
-        )
-        VRayBlendMtl1:(
-            _t = mat.baseMtl
-            replaceinstances mat _t
-        )
-        VrayMtlWrapper:(
-            _t = mat.baseMtl
-            replaceinstances mat _t
-        )
+fn SetColor parentNode prop_name clr = (
+    texture_type = classof parentNode
+    if texture_type == RGB_Multiply or texture_type == Checker or texture_type == Falloff or texture_type == Noise do (
+        if prop_name == #map1 do setProperty parentNode #Color1 clr
+        if prop_name == #map2 do setProperty parentNode #Color2 clr
+    )
+
+    if texture_type == Color_Correction do setProperty parentNode #color clr
+    
+    if texture_type == BlendedBoxMap do setProperty parentNode #tex[1] clr
+
+    if texture_type == Mix do (
+        if prop_name == #map1 do setProperty parentNode #Color1 clr
+        if prop_name == #map2 do setProperty parentNode #Color2 clr                                
+        if prop_name == #Mask do setProperty parentNode #mixAmount (clr.v / 255.0)
+    )
+
+    if texture_type == Bricks do (
+        if prop_name == #Bricks_Map do setProperty parentNode #Brick_color clr
+        if prop_name == #Mortar_Map do setProperty parentNode #Mortar_color clr
+    )
+
+    if texture_type == VRayDirt do (
+        if prop_name == #texmap_unoccluded_color do setProperty parentNode #unoccluded_color clr
+        if prop_name == #texmap_occluded_color do setProperty parentNode #occluded_color clr
+    )
+
+    if texture_type == VRayDistanceTex do (
+        if prop_name == #texmap_far do setProperty parentNode #far_color clr
+        if prop_name == #texmap_near do setProperty parentNode #near_color clr
+        if prop_name == #texmap_inside do setProperty parentNode #inside_color clr
+        if prop_name == #texmap_outside do setProperty parentNode #outside_color clr
+    )
+
+    if texture_type == VRayUserColor do (
+        if prop_name == #default_texmap do setProperty parentNode #default_color clr
+    )
+
+    if texture_type == ColorMap do (
+        if prop_name == #map do setProperty parenetNode #SOLIDCOLOR clr
     )
 )
 
---整理场景中的纹理
-fn simplyTex node = (
-    try( nodeType = classof node ) catch ()
+fn FixTexture texture = (
+	case classof texture of (
+		Mix:(
+			texture.map1 = FixTexture texture.map1
+			texture.map2 = FixTexture texture.map2
+			return texture
+		)
+		Checker:(
+			texture.map1 = FixTexture texture.map1
+			texture.map2 = FixTexture texture.map2
+			return texture
+		)
+		ColorCorrection:(
+			texture.map = FixTexture texture.map
+			return texture
+		)
+		CompositeTexturemap:(
+			return FixTexture texture.maplist[1]
+		)
+		Bitmaptexture:(
+			return texture
+		)
+		Falloff:(
+			texture.map1 = FixTexture texture.map1
+			texture.map2 = FixTexture texture.map2
+			return texture
+		)
+		Gradient:(
+            texture.map1 = FixTexture texture.map1
+			texture.map2 = FixTexture texture.map2
+			texture.map3 = FixTexture texture.map3
+			return texture
+		)
+		RGB_Multiply:(
+            texture.map1 = FixTexture texture.map1
+			texture.map2 = FixTexture texture.map2
+			return texture
+		)
+		Tiles:(
+			texture.Mortar_Map = FixTexture texture.Mortar_Map
+			texture.Bricks_Map = FixTexture texture.Bricks_Map
+			return texture
+		)
+		Cellular:(
+			return FixTexture texture.cellMap
+		)
+		VRayBump2Normal:(
+			texture.bump_map = FixTexture texture.bump_map
+			return texture
+		)
+		VRayColor2Bump:(
+            texture.map = FixTexture texture.map
+			return texture
+		)
+		VRayCompTex:(
+			return FixTexture texture.sourcea
+		)
+		VRayDirt:(
+			texture.texmap_occluded_color = FixTexture texture.texmap_occluded_color
+			texture.texmap_unoccluded_color = FixTexture texture.texmap_unoccluded_color
+			texture.texmap_radius = FixTexture texture.texmap_radius
+			
+			return texture
+		)
+		VRayMultiSubTex:(
+			return FixTexture texture.default_texmap
+		)
+        VRayTriplanarTex:(
+			return FixTexture texture.texture
+		)
+		VRayNormalMap:(
+			texture.normal_map = FixTexture texture.normal_map
+			texture.bump_map = FixTexture texture.bump_map
+			return texture
+		)
+		default:(
+			return undefined
+		)
+	)
+)
 
-    case nodeType of
-    (
-        CompositeTexturemap:(
-            return (simplyTex node.maplist[1])
-        )
-        Output: (
-            return (simplyTex node.map1)
-        )
-        VRayNormalMap: (
-            return (simplyTex node.normal_map)
-        )
-        VRayColor2Bump: (
-            return (simplyTex node.map)
-        )
-        VRayTriplanarTex: (
-            return (simplyTex node.texture)
-        )
-        CoronaColorCorrect: (
-            return (simplyTex node.inputTexmap)
-        )
-        CoronaAO: (
-            return (simplyTex node.colorUnoccluded)
-        )
-        CoronaNormal: (
-            return (simplyTex node.normalMap)
-        )
-        Bitmaptexture: (
-            return node
-        )
-        BlendedBoxMap: (
-            return (simplyTwx node.tex[1])
-        )
-        Combustion:
-            return undefined
-        default:
-            return node
-    )	
+fn VRayBitmap_to_Bitmap vb = (
+    bm = Bitmaptexture filename:vb.HDRIMapName
+    replaceinstances vb bm
+)
+
+fn Convert_CoronaBitmap_to_Bitmap cb = (
+
+)
+
+fn FindTexture texture = (
+    tmp = refs.dependents texture
+	for x = 1 to tmp.count do (		
+		supetClass = superclassof tmp[x]
+		if supetClass == textureMap or supetClass == material do (
+			for prop_name in (getPropNames (classof tmp[x])) do (
+				att = getProperty tmp[x] prop_name
+				if att == texture do (
+                    setProperty tmp[x] prop_name undefined
+
+                    clr = texture.color                             
+                    setColor tmp[x] prop_name clr
+                 )
+            )      
+		)
+	)
 )
 
 --整理所有材质
-fn simplyMat mat = (
-    --整理场景材质
-    matType = classof mat
-    case matType of
-    (
-        VrayMtl:
-        (
-            if classof mat.texmap_diffuse == VrayColor do (
-                gamma = mat.texmap_diffuse.color_gamma
-                clr = mat.texmap_diffuse.color
-                _c = ConvertGamma clr gamma
+fn CleanUpMaterials = (    
+        
+    for i in getClassInstances VRayOverrideMtl do (
+        _t = i.baseMtl
+        replaceinstances i _t
+    )
+    for i in getClassInstances VRayBlendMtl do (
+        _t = i.baseMtl
+        replaceinstances i _t
+    )
+    
+    for i in getClassInstances VrayMtlWrapper do (
+        _t = i.baseMtl
+        replaceinstances i _t
+    )
 
-                mat.diffuse = _c
-                mat.texmap_diffuse = undefined
-            )
-
-            if classof mat.texmap_diffuse == ColorMap do (
-                gamma = mat.texmap_diffuse.gamma
-                clr = mat.texmap_diffuse.SOLIDCOLOR
-                _c = ConvertGamma clr gamma
-
-                mat.diffuse = _C
-                mat.texmap_diffuse = undefined
-            )
-
-            mat.texmap_diffuse = simplyTex mat.texmap_diffuse
-            mat.texmap_reflection = simplyTex mat.texmap_reflection
-            mat.texmap_reflectionGlossiness = simplyTex mat.texmap_reflectionGlossiness
-            mat.texmap_refraction = simplyTex mat.texmap_refraction
-            mat.texmap_refractionGlossiness = simplyTex mat.texmap_refractionGlossiness
-            mat.texmap_metalness = simplyTex mat.texmap_metalness
-            mat.texmap_refractionIOR  = simplyTex mat.texmap_refractionIOR 
-            mat.texmap_opacity  = simplyTex mat.texmap_opacity 
-            mat.texmap_bump = simplyTex mat.texmap_bump
-            mat.texmap_self_illumination = simplyTex mat.texmap_self_illumination
-        )
-        Standardmaterial:
-        (
-            mat.diffuseMap = simplyTex mat.diffuseMap
-            mat.reflectionMap = simplyTex mat.reflectionMap
-            mat.refractionMap = simplyTex mat.refractionMap
-            mat.glossinessMap = simplyTex mat.glossinessMap
-            mat.bumpMap = simplyTex mat.bumpMap
-            mat.opacityMap = simplyTex mat.opacityMap
-        )
-        CoronaMtl:
-        (
-            mat.texmapDiffuse = simplyTex mat.texmapDiffuse
-            mat.texmapReflect = simplyTex mat.texmapReflect
-            mat.texmapReflectGlossiness = simplyTex mat.texmapReflectGlossiness
-            mat.texmapRefract = simplyTex mat.texmapRefract
-            mat.texmapRefractGlossiness = simplyTex mat.texmapRefractGlossiness
-            mat.texmapBump = simplyTex mat.texmapBump
-            mat.texmapOpacity = simplyTex mat.texmapOpacity
-            mat.texmapIor = simplyTex mat.texmapIor
-            mat.texmapSelfIllum = simplyTex mat.texmapSelfIllum
-        )
-        VRayLightMtl:
-        (
-            mat.texmap = simplyTex mat.texmap
-            mat.opacity_texmap = simplyTex mat.opacity_texmap
-        )
-        MultiMaterial:
-        (
-            for i = 1 to mat.numsubs do
-            (
-                simplyMat mat[i]
+    for mat in getClassInstances VRayMtl do (
+        for p in getPropNames VRayMtl do (
+            if (findString (p as string) "texmap_") != undefined do (
+                att = getProperty mat (p as string)
+                if superClassOf att == textureMap do (
+                    tex = FixTexture att
+                    setProperty mat p tex
+                )  
             )
         )
     )
+
+)
+
+fn ConvertProxy = (
+
+)
+
+fn ShapeToPoly = (
+    for i in Shapes do (
+        if i.render_renderable == true do (
+            convertToPoly i
+        )
+    )
+)
+
+fn CleanUpUnShpae = (
+    allshape = #()
+    for x in shapes do
+    (
+        tmp = refs.dependents x
+        for i = 1 to tmp.count do
+        (
+            if (superclassof tmp[i]) == GeometryClass then
+            (
+                a = findItem allshp x
+                if a != 0 then append allshp a
+            )
+        )
+    )
+    delete allshp
+)
+
+fn DeleteEmptyPoly = (
+    sel = #()
+    for i in Geometry do 
+    (
+        try(if getNumFaces i == 0 then append sel i)catch()
+    )
+    delete sel
+)
+
+fn ResetGroupPivot = (
+    for i in objects do (
+        if isGroupHead i do (
+            CenterPivot i
+        )
+    )
+)
+
+fn ClearUserProp = (
+    for i in objects do (
+        setUserPropBuffer i ""
+    )
+)
+
+function setRegistryKey key subkey val =
+(
+	registry.openKey HKEY_CURRENT_USER key accessRights:#all key:&key1
+	registry.createKey HKEY_CURRENT_USER key accessRights:#all newKeyCreated:&newKeyCreated key:&key1
+	registry.setValue key1 subkey #REG_SZ val
 )
 
 ------- Bitmap Node BEGIN  ------------
@@ -398,7 +532,6 @@ fn CreateElement ParentNode Texture = (
 
             CheckerMap1Node = xmlDoc.CreateElement "Checker_Map1"
             CheckerNode.appendChild CheckerMap1Node
-
             Map1 = getProperty Texture "map1"
             CreateElement CheckerMap1Node Map1
 
@@ -432,7 +565,6 @@ fn CreateElement ParentNode Texture = (
 
             MaskNode = xmlDoc.CreateElement "Mask"
             MixNode.appendChild MaskNode
-
             MaskMap = getProperty Texture "Mask"
             CreateElement MaskNode MaskMap
 
@@ -483,11 +615,13 @@ fn CreateElement ParentNode Texture = (
             -- CCParams = getPropNames Color_Correction
             for i in CCParams do (
                 atts = getProperty Texture i
-                CCNode.setAttribute i (atts as string)s
+                CCNode.setAttribute i (atts as string)
             )
 
+            CCMap = xmlDoc.CreateElement "Map"
+            CCNode.appendChild CCMap
             map = getProperty Texture "map"
-            CreateElement CCNode map
+            CreateElement CCMap map
         )
         RGB_Multiply:(
             RGBMultNode = xmlDoc.CreateElement "RGBMultiply"
@@ -558,7 +692,7 @@ fn CreateElement ParentNode Texture = (
         VrayBump2Normal:(
             params = #("bump_map", "bump_map_mult", "mode", "map_channel")
 
-            NormalNode = xmlDoc.CreateElement "Normal"
+            NormalNode = xmlDoc.CreateElement "Bump"
             ParentNode.appendChild NormalNode
 
             for p in params do (
@@ -566,42 +700,59 @@ fn CreateElement ParentNode Texture = (
                 NormalNode.setAttribute p (att as string)
             )
 
-            MapNode = xmlDoc.CreateElement "Map"
+            MapNode = xmlDoc.CreateElement "NormalMap"
             NormalNode.appendChild MapNode
             Map = getProperty  texture "bump_map"
             CreateElement MapNode map
         )
-        /*
-        Gradient_Ramp:(
-            --Params = #(size, phase, amount, Gradient_Type, Noise_Type, Low_Threshold, High_Threshold, Source_Map_On, Threshold_Smoothing, levels)
-
+        Vertex_Color:(
+            VCNode = xmlDoc.CreateElement "VertexColor"
+            ParentNode.appendChild VCNode
         )
-        BerconTile
-        CompositeTexturemap
-        */
-    )
-)
+        VRayNormalMap:(
+            params = #("normal_map", "normal_map_on", "normal_map_multiplier", "bump_map", "bump_map_on", "bump_map_multiplier", "map_channel", "flip_red", "flip_green", "swap_red_and_green", "map_rotation", "apply_gamma", "blue2Z_mapping_method")
 
--------------------------
---- 处理重名材质名字
---- Unique Material Name
-fn MakeUniqueMaterialName =(
-    SingleMtlList = #()
-    for cls in material.classes do (
-        for i in getClassInstances cls do (
-            index = findItem SingleMtlList i.name
+            BumpNode = xmlDoc.CreateElement "Bump"
+            ParentNode.appendChild BumpNode
             
-            rec = appendIfUnique SingleMtlList i.name
-            if not rec do (
-                newName = i.name + "_RH_" + timeStamp() as string
-                appendIfUnique SingleMtlList newName
-                i.name = newName
+            for p in params do (
+                att = getProperty texture p
+                BumpNode.setAttribute p (att as string)
             )
+
+            MapNormalNode = xmlDoc.CreateElement "NormalMap"
+            BumpNode.appendChild MapNormalNode
+            map1 = getProperty texture "normal_map"
+            CreateElement MapNormalNode map1
+
+            MapBumpNode = xmlDoc.CreateElement "HeightMap"
+            BumpNode.appendChild MapBumpNode
+            map2 = getProperty texture "bump_map"
+            CreateElement MapBumpNode map2
+
+        )
+        VRayColor2Bump:(
+            params = #(#map, #height, #bump_delta_scale)
+
+            BumpNode = xmlDoc.CreateElement "Bump"
+            ParentNode.appendChild BumpNode
+
+            for p in params do (
+                att = getProperty texture p
+                BumpNode.setAttribute p (att as string)
+            )
+
+            MapNormalNode = xmlDoc.CreateElement "NormalMap"
+            BumpNode.appendChild MapNormalNode
+
+            MapBumpNode = xmlDoc.CreateElement "HeightMap"
+            BumpNode.appendChild MapBumpNode
+            MapBump = getProperty texture "map"
+            CreateElement MapBumpNode MapBump
         )
     )
 )
---处理重名材质结束
------------------------
+
 fn ExportSetting ParentNode = (
 
     RenderElement = xmlDoc.CreateElement "Renderer"
@@ -622,25 +773,94 @@ fn ExportSetting ParentNode = (
 )
 
 fn ExportLight ParentNode = (
-    -- Lights List
-    L_Color = ""
-    L_Multiplier = ""
-    L_Type = "AREA"
-    L_Length = 0.1
-    L_Width = 0.1
-    L_IES = "undefined"
-    L_Invisible = false
-    L_Shadow = true
-    L_Diffuse = true
-    L_Specular = true
-    L_Reflection = true
-    L_Portal = false
-
+    
     for i in Lights do (
+        -- Lights List
+        L_Color = "(color 255 255 255)"
+        L_Multiplier = "1"
+        L_Type = "AREA"
+        L_Length = 0.1
+        L_Width = 0.1
+        L_IES = "undefined"
+        L_Hotspot = "0"
+        L_Falloff = "45"
+        L_Invisible = false
+        L_Shadow = true
+        L_Diffuse = true
+        L_Specular = true
+        L_Reflection = true
+        L_Portal = false
         
         LightType = classof i
         if LightType != TargetObject do (
             case LightType of (
+                Target_Light:(
+                    L_Color = i.rgbFilter
+                    L_Multiplier = i.intensity / 1000 
+
+                    if i.Distribution == 3 do (
+                        L_Type = "POINT"
+                        L_IES = i.webfile
+                    )
+                    if i.Distribution == 1 do (
+                        L_Type = "SPOT"
+                        L_IES = "undefined"
+                        L_Hotspot = i.Hotspot
+                        L_Falloff = i.falloff
+                    )
+                    if i.Distribution == 2 or i.Distribution == 0 do (
+                        L_Type = "POINT"
+                        L_IES = "undefined"
+                    )
+                )
+                Free_Light:(
+                    L_Color = i.rgbFilter
+                    L_Multiplier = i.intensity / 1000 
+
+                    if i.Distribution == 3 do (
+                        L_Type = "POINT"
+                        L_IES = i.webfile
+                    )
+                    if i.Distribution == 1 do (
+                        L_Type = "SPOT"
+                        L_IES = "undefined"
+                        L_Hotspot = i.Hotspot
+                        L_Falloff = i.falloff
+                    )
+                    if i.Distribution == 2 or i.Distribution == 0 do (
+                        L_Type = "POINT"
+                        L_IES = "undefined"
+                    )
+                )
+                targetSpot:(
+                    L_Color = i.rgb
+                    L_Multiplier = i.multiplier 
+                    L_Type = "SPOT"
+                    L_Hotspot = i.Hotspot
+                    L_Falloff = i.falloff
+                )
+                freeSpot:(
+                    L_Color = i.rgb
+                    L_Multiplier = i.multiplier                     
+                    L_Type = "SPOT"
+                    L_Hotspot = i.Hotspot
+                    L_Falloff = i.falloff
+                )
+                TargetDirectionallight:(
+                    L_Color = i.rgb
+                    L_Multiplier = i.multiplier 
+                    L_Type = "SUN"
+                )
+                Directionallight:(
+                    L_Color = i.rgb
+                    L_Multiplier = i.multiplier 
+                    L_Type = "SUN"
+                )
+                Omnilight:(
+                    L_Color = i.rgb
+                    L_Multiplier = i.multiplier 
+                    L_Type = "POINT"
+                )
                 VRayLight:(
                     L_Color = i.color
                     L_Multiplier = i.multiplier
@@ -687,6 +907,8 @@ fn ExportLight ParentNode = (
                     L_Reflection = "false"
                     L_Portal = "false"
                 )
+                CoronaLight:()
+                CoronaSun:()
             )
 
             LightsList = xmlDoc.CreateElement "Light"
@@ -699,7 +921,9 @@ fn ExportLight ParentNode = (
             LightsList.setAttribute "type" L_Type
             LightsList.setAttribute "length" (L_Length as string)
             LightsList.setAttribute "width" (L_Width as string)
-            LightsList.setAttribute "IES" L_IES
+            LightsList.setAttribute "ies" L_IES
+            LightsList.setAttribute "hotspot" (L_Hotspot as string)
+            LightsList.setAttribute "falloff" (L_Falloff as string)
             LightsList.setAttribute "caseshadows" (L_Shadow as string)
             LightsList.setAttribute "invisible" (L_Invisible as string)
             LightsList.setAttribute "affectdiffuse" (L_Diffuse as string)
@@ -711,23 +935,71 @@ fn ExportLight ParentNode = (
             
 )
 
-fn ExportCamera ParenNode = (
+fn ExportCamera ParentNode = (
     -- Camera List
     for i in Cameras do (
         if classof i != TargetObject do (
             name = i.name
             fov = i.fov as string
             matrix = i.transform
+            nearclip = 1
+            farclip = 1000
+
+            case classof i of (
+                Targetcamera:(
+                    nearclip = i.nearclip
+                    farclip = i.farclip
+                )
+                Freecamera:(
+                    nearclip = i.nearclip
+                    farclip = i.farclip
+                )
+                Physical:(
+                    nearclip = i.near_clip
+                    farclip = i.far_clip
+                )
+                VRayPhysicalCamera:(
+                    nearclip = i.near_clip
+                    farclip = i.far_clip
+                )
+                CoronaCam:(
+                    nearclip = i.clippingNear
+                    farclip = i.clippingFar
+                )
+            )
 
             cameraList = xmlDoc.createElement "Camera"
             cameraList.setAttribute "name" name
             cameraList.setAttribute "fov" fov
+            cameraList.setAttribute "near" (nearclip as string)
+            cameraList.setAttribute "far" (farclip as string)
             cameraList.setAttribute "matrix" (matrix as string)
-            ParenNode.appendChild cameraList
+            ParentNode.appendChild cameraList
         )
     )
 )
 
+fn ExportEnvironment ParentNode = (
+    Environment = xmlDoc.CreateElement "Environment"
+    ParentNode.appendChild Environment
+
+    DemoLights = for i in Lights where classof i == Skylight collect i
+
+    for i in Lights do (
+        if classof i == VRayLight do (
+            if i.type == 1 do (
+                append DemoLights i
+            )
+        )
+    )
+
+    if DemoLights.count > 0 do (
+
+    )
+
+
+
+)
 /*-------------------------------------
 ---------- FUNCTION END ---------------
 -------------------------------------*/
@@ -737,70 +1009,116 @@ fn ExportCamera ParenNode = (
 */
 try(DestroyDialog M2B) catch()
 
-xmlname = "RH_M2B.xml"
-fbxname = "RH_M2B.fbx"
-filepath = sysInfo.tempdir
-
-rollout M2B "Export Blender"
+rollout M2B "Export2Blender(20220207)-RedHalo Studio(发霉的红地蛋)"
 (
     local RedHalo_Exp_SmoothGroup = true
     local RedHalo_Exp_Animation = false
     local RedHalo_Exp_Cameras = false
     local RedHalo_Exp_Lights = false
+    local xmlname = "RH_M2B.xml"
+    local fbxname = "RH_M2B.fbx"
+    local filepath = sysInfo.tempdir
+    local export_mode = 0
 
-    groupBox gb1 "导出选项" width:190 height:75 pos:[5,5]
-    radiobuttons rb_export_mode "" labels:#("整个场景", "选择物体") pos:[20,20]
-    checkbutton cb_export_Object "代理物体" checked:true width:60 pos:[10,45] enabled:false
-    checkbutton cb_export_Camera "相机" checked:true width:60 pos:[70,45] enabled:false
-    checkbutton cb_export_Light "灯光"  checked:true width:60 pos:[130,45] enabled:false
+    groupBox gb1 "导出选项" width:300 height:65 pos:[5,5]
+    -- radiobuttons rb_export_mode "" labels:#("整个场景", "选择物体") pos:[20,20]
+    -- checkbutton cb_export_Object "代理物体" checked:true width:60 pos:[10,45] enabled:false
+    checkbutton cb_export_all "所有物体" checked:true height:40 width:145 pos:[10,20] tooltip:"导出场景中所有物体"
+    checkbutton cb_export_sel "选择物体" checked:false height:40 width:145 pos:[155,20] tooltip:"导出场景中选择的物体"
 
-    groupBox gb2 "模型选项" width:190 height:70 pos:[5, 85] enabled:false
-    checkbutton cb_m_fbx_smoothGroup "Smoothing Groups" checked:true height:20 width:170 pos:[15, 100] enabled:false
+    groupBox gb2 "模型选项" width:300 height:60 pos:[5, 75] enabled:false
+    checkbutton cb_m_fbx_smoothGroup "Smoothing Groups" checked:true height:20 width:170 pos:[15, 90] enabled:false
     -- checkbutton cb_m_fbx_camera "Camera" checked:true height:20 width:170 pos:[15, 120] enabled:false
     -- checkbutton cb_m_fbx_Lights "Lights" checked:true height:20 width:170 pos:[15, 140] enabled:false
-    checkbutton cb_m_fbx_Animation "Animation" checked:true height:20 width:170 pos:[15, 120] enabled:false
+    checkbutton cb_m_fbx_Animation "Animation" checked:true height:20 width:170 pos:[15, 110] enabled:false
     -- checkbutton cb_m_fbx_ConvertUnit "Convert Unit" checked:true height:20 width:170 pos:[15, 180] enabled:false 
     
-    groupbox gb3 "导出文件位置" width:190 height:40 pos:[5, 160]
-    edittext et_folder "" width:165 pos:[5, 182]
-    button btn_folder "..." width:20 height:20 pos:[170, 180]
+    groupbox gb3 "导出文件位置" width:300 height:60 pos:[5, 140]
+    -- edittext et_folder "" width:270 pos:[5, 182] readonly:true enabled:false
+    -- button btn_folder "..." width:20 height:20 pos:[275, 180]
+    button btn_folder "" width:290 height:30 pos:[10, 160] border:false tooltip:"点击选择导出目录" enabled:false
 
-    button btn_export "导出" width:155 height:30 pos:[10,210]
-    button btn_about "?" width:30 height:30 pos:[165, 210]
+    button btn_export "导出" width:85 height:120 pos:[310,10]
+    button btn_about "?" width:85 height:30 pos:[310, 130]  tooltip:"帮助说明"
 
-    label lbl_right "(C)RedHalo Studio 发霉的红地蛋"
+    on M2B open do (
+	    export_path = ""
+	    registry.openKey HKEY_CURRENT_USER "SOFTWARE\\REDHALO" accessRights:#all key:&key1
+	    if key1 != undefined then
+		    registry.queryValue key1 "Export" type:#REG_SZ value:&export_path expand:false
+	    
+        btn_folder.text = export_path
+    )
+
+    on cb_export_all changed state do (
+        cb_export_sel.checked = not state
+        if state then (
+            export_mode = 0
+        )else(
+            export_mode = 1
+        )
+    )
+
+    on cb_export_sel changed state do (
+        cb_export_all.checked = not state
+        
+        if state then (
+            export_mode = 1
+        )else(
+            export_mode = 0
+        )
+    )
 
     on btn_about pressed do (
-        messageBox "此版本编译于2022-01-16\n此版本限制：仅支持Vray英文版，不支持汉化版本\n其它材质不会导出，因此Blender加载后为空白节点\n支持材质类型：VrayMtl(Vray标准材质), Vray双面材质\n支持纹理类型: 标准贴图，平铺"
+        messageBox "此版本编译于2022-02-07\n此版本限制：仅支持Vray英文版，不支持汉化版本\n其它材质不会导出"
     )
 
     on btn_folder pressed do (
         folder = getSavepath()
-        if folder != undefined do et_folder.text = folder
+        if folder != undefined do (
+            et_folder.text = folder
 
-        -- 写入注册表
-        --计算机\HKEY_CURRENT_USER\SOFTWARE\3DtoAll
-        --registry.createKey <HKey> <string subKeyName> accessRights:<{#readOnly|#writeOnly|#all| <int>}> newKeyCreated:<&bool>Key:<&HKey>volatile:<bool> 
-        registry.createKey HKEY_CURRENT_USER "SOFTWARE\\REDHALO" accessRights:#all newKeyCreated:&newKeyCreated key:&key1
-        registry.setValue HKEY_CURRENT_USER "SOFTWARE\\REDHALO" #REG_SZ "path"
+            -- 写入注册表        
+            setRegistryKey "SOFTWARE\\REDHALO" "Export" folder
+        )
     )
 
     on btn_export pressed do (
+        
+        holdMaxFile()
+
+        -- 场景清理
+        DuplicateObjectNam()
+
+        -- 处理场景不可用的纹理类型
+        for i in getClassInstances VRayBitmap do (
+            try(VRayBitmap_to_Bitmap i) catch( print ("ERROR :" + i as string))
+        )
+
+        CleanUpMaterials()
+        
+        ResetGroupPivot()
+        ClearUserProp()
+        ShapeToPoly()
+        DeleteEmptyPoly()
+        -- CleanUpUnShpae()
 
         ExportSetting SettingElement
-
         ExportLight LightListElement
-
         ExportCamera CameraListElement
-
-        for i in sceneMaterials do (
-            ChangeMtlType i
-            simplyMat i
-        )
+        -- 强制更新场景材质
         saveNodes #() (filepath + "rh-empty.max")
+
+        -- 删除相机和灯光
+        cams = Cameras as Array
+        delete cams
+        alllight = Lights as Array
+        delete alllight
+
 
         -- 清理材质管理器
         CleanMeditSlot()
+
         -- 处理重名材质
         MakeUniqueMaterialName()
         
@@ -808,30 +1126,39 @@ rollout M2B "Export Blender"
         ------ 复合材质列表
         -- Vray2SidedMtl List
         for i in getClassInstances VRay2SidedMtl do (
-            SideMtl = xmlDoc.createElement "DoubleSideMtl"
+            for m in refs.dependents i do (
+                if superClassOf m == GeometryClass do (
+                    
+                    SideMtl = xmlDoc.createElement "DoubleSideMtl"
 
-            MaterialList.appendChild sideMtl
+                    MaterialList.appendChild sideMtl
 
-            sideMtl.setAttribute "name" i.name
-            for p in (getPropNames i) do (
-                att = getProperty i p
-                sideMtl.setAttribute p (att as string)
+                    sideMtl.setAttribute "name" i.name
+                    for p in (getPropNames i) do (
+                        att = getProperty i p
+                        sideMtl.setAttribute p (att as string)
 
-                CreateElement sideMtl att
+                        CreateElement sideMtl att
+                    )
+                )
             )
         )
 
         -- VrayOverrideMtl List
         for i in getClassInstances VrayOverrideMtl do (
-            OverrideMtl = xmlDoc.createElement "OverrideMtl"
-            MaterialList.appendChild OverrideMtl
-            -- VrayOverrideMtl, baseMtl, baseMtl_on, giMtl, gimtl_on, reflectMtl, reflectmtl_on, refractMtl, refractmtl_on, shadowMtl, shadowMtl_on
-            -- CoronaRaySwitchMtl giMtl, reflectMtl, refractMtl, directMtl, displacementSource, viewportSource
-            OverrideMtl.setAttribute "name" i.name
+            for m in refs.dependents i do (
+                if superClassOf m == GeometryClass do (
+                    OverrideMtl = xmlDoc.createElement "OverrideMtl"
+                    MaterialList.appendChild OverrideMtl
+                    -- VrayOverrideMtl, baseMtl, baseMtl_on, giMtl, gimtl_on, reflectMtl, reflectmtl_on, refractMtl, refractmtl_on, shadowMtl, shadowMtl_on
+                    -- CoronaRaySwitchMtl giMtl, reflectMtl, refractMtl, directMtl, displacementSource, viewportSource
+                    OverrideMtl.setAttribute "name" i.name
 
-            for p in getPropNames i do (
-                att = getProperty i p
-                OverrideMtl.setAttribute p (att as string)
+                    for p in getPropNames i do (
+                        att = getProperty i p
+                        OverrideMtl.setAttribute p (att as string)
+                    )
+                )
             )
         )
         -----复合材质列表 结束
@@ -841,72 +1168,138 @@ rollout M2B "Export Blender"
         ------ 基础材质节点列表
         -- VrayMtl List
         for i in getClassInstances VrayMtl do (
-            SingleMtl = xmlDoc.createElement "SingleMtl"
-            MaterialList.appendChild singleMtl
 
-            SingleMtl.setAttribute "name" i.name
+            -- 只把场景中使用的材质导出
 
-            -- VRayProps = #("brdf_useRoughness")
-            useRoughness = getProperty i "brdf_useRoughness"
-            SingleMtl.setAttribute "useRoughness" (useRoughness as string)
+            for v in refs.dependents i do (
+                if superClassOf v == GeometryClass do (
 
-            for idx = 1 to NodeArray.count do (
-                propName = NodeArray[idx]
+                    SingleMtl = xmlDoc.createElement "SingleMtl"
+                    MaterialList.appendChild singleMtl
 
-                _node = xmlDoc.CreateElement propName
-                SingleMtl.appendChild _node
+                    SingleMtl.setAttribute "name" i.name
 
-                PropsArray = NodePropsArray[idx]
-                AttribArray = AttribsArray[idx]
+                    -- VRayProps = #("brdf_useRoughness")
+                    useRoughness = getProperty i "brdf_useRoughness"
+                    SingleMtl.setAttribute "useRoughness" (useRoughness as string)
 
-                num = 0
-                
-                for prop in PropsArray do (
-                    num += 1
-                    value = ""
-                    texture = getProperty i prop
-                    value = texture as string
+                    -- LockIOR，就使用折射的IOR，否则就使用反射的IOR
+                    lockIOR = true
+                    lockIOR = getProperty i "reflection_lockior"
+                    ior = 1.6
+                    metallic_value = 0
+                    useIOR = getProperty i "reflection_fresnel"
                     
-                    if (prop == "Reflection") or (prop == "Refraction") or (prop == "sheen_color") do (
-                        value = (texture.v / 255.0) as string                        
+                    if lockIOR then (
+                        ior = getProperty i "refraction_ior"
+                    )else(
+                        ior = getProperty i "reflection_ior"
                     )
-                    _node.setAttribute AttribArray[num] value
-                    
-                    CreateElement _node texture
+
+                    if useIOR == false then (
+                        metallic_value = 1.0
+                    ) 
+
+                    -- 如果IOR值高于5，设置Metallic为真
+                    if ior > 5 then (
+                        metallic_value = 1.0
+                        ior = 1.6
+                    )
+
+                    for idx = 1 to NodeArray.count do (
+                        propName = NodeArray[idx]
+
+                        _node = xmlDoc.CreateElement propName
+                        SingleMtl.appendChild _node
+
+                        PropsArray = NodePropsArray[idx]
+                        AttribArray = AttribsArray[idx]
+
+                        num = 0
+                                        
+                        for prop in PropsArray do (
+                            num += 1
+                            value = ""
+                            texture = getProperty i prop
+                            value = texture 
+                            
+                            if (prop == "Reflection") or (prop == "Refraction") or (prop == "sheen_color") do (
+                                value = (texture.v / 255.0) 
+                            )
+
+                            -- 设置IOR值
+                            if (prop == "reflection_ior") do (
+                                value = ior
+                            )
+                            -- 设置Metallic
+                            if (prop == "reflection_metalness") do (
+                                value = metallic_value
+                            )
+
+                            _node.setAttribute AttribArray[num] (value as string)
+                            
+                            CreateElement _node texture
+                        )
+                    )
+                )
+            )
+
+        )
+
+        -- VRayLightMtl
+        for i in getClassInstances VrayLightMtl do (
+            for m in refs.dependents i do (
+                if superClassOf m == GeometryClass do (
+                    LightMtl = xmlDoc.CreateElement "LightMtl"
+                    MaterialList.appendChild LightMtl
+                    LightMtl.setAttribute "name" i.name
+
+                    --VrayLightProps = #( "color" ,"multiplier" ,"texmap" ,"texmap_on" ,"twoSided" ,"compensate_exposure" ,"opacity_multiplycolor" ,"opacity_texmap" ,"opacity_texmap_on" ,"directLight_on" ,"directLight_subdivs" ,"directLight_cutoffThreshold" ,"displacement_multiplier" ,"displacement_texmap" ,"displacement_texmap_on" ,"texmap_resolution" ,"texmap_adaptiveness"
+                    VrayLightProps = #( "color" ,"multiplier" ,"texmap" ,"texmap_on" ,"twoSided" , "opacity_multiplycolor" ,"opacity_texmap" ,"opacity_texmap_on")
+
+                    --for idx = 1 to NodeArray.count do (
+                    for p in VrayLightProps do (
+                        att = getProperty i p
+                        LightMtl.setAttribute p (att as string)
+                        
+                    )
+
+                    LightMap = xmlDoc.CreateElement "Lightmap"
+                    LightMtl.appendChild Lightmap
+                    tex = getProperty i "texmap" 
+                    CreateElement LightMap tex
+
+                    OpacityMap = xmlDoc.CreateElement "Opacitymap"
+                    LightMtl.appendChild OpacityMap
+                    tex = getProperty i "opacity_texmap"
+                    CreateElement OpacityMap tex
                 )
             )
         )
 
-        for i in getClassInstances VrayLightMtl do (
-            LightMtl = xmlDoc.CreateElement "LightMtl"
-            MaterialList.appendChild LightMtl
-            LightMtl.setAttribute "name" i.name
-
-            --VrayLightProps = #( "color" ,"multiplier" ,"texmap" ,"texmap_on" ,"twoSided" ,"compensate_exposure" ,"opacity_multiplycolor" ,"opacity_texmap" ,"opacity_texmap_on" ,"directLight_on" ,"directLight_subdivs" ,"directLight_cutoffThreshold" ,"displacement_multiplier" ,"displacement_texmap" ,"displacement_texmap_on" ,"texmap_resolution" ,"texmap_adaptiveness"
-            VrayLightProps = #( "color" ,"multiplier" ,"texmap" ,"texmap_on" ,"twoSided" , "opacity_multiplycolor" ,"opacity_texmap" ,"opacity_texmap_on")
-
-            --for idx = 1 to NodeArray.count do (
-            for p in VrayLightProps do (
-                att = getProperty i p
-                LightMtl.setAttribute p (att as string)
-                
+        -- CoronaMtl
+        /*
+        for i in getClassInstances CoronaMtl do (
+            for m in refs.dependents i do (
+                if superClassof m == GeometryClass do (
+                    -- 导出Corona材质
+                )
             )
-
-            LightMap = xmlDoc.CreateElement "Lightmap"
-            LightMtl.appendChild Lightmap
-            tex = getProperty i "texmap" 
-            CreateElement LightMap tex
-
-            OpacityMap = xmlDoc.CreateElement "Opacitymap"
-            LightMtl.appendChild OpacityMap
-            tex = getProperty i "opacity_texmap"
-            CreateElement OpacityMap tex
-            
         )
-        
-        xmlDoc.Save (filepath + xmlname)
-        xmlDoc.Save ("D:\\xml_Temp.xml")
+        -- CoronaLightMtl
+        for i in getClassInstances CoronaLightMtl do (
+            for m in refs.dependents i do (
+                if superClassof m == GeometryClass do (
+                    -- 导出Corona材质
+                )
+            )
+        )
+        */
+        -- if et_folder.text != "" do filepath = et_folder.text
 
+        xmlDoc.Save (filepath + xmlname)
+        xmlDoc.Save ("D:\\xml_Temp.xml") --测试文件，方便查看
+        
         --------FBX EXPORT-----
         pluginManager.loadClass FBXEXP
         --Geometry------------------------------------------------------------------------
@@ -914,7 +1307,7 @@ rollout M2B "Export Blender"
         FBXExporterSetParam "NormalsPerPoly" false
         FBXExporterSetParam "TangentSpaceExport" true
         FBXExporterSetParam "SmoothMeshExport" false
-        FBXExporterSetParam "Preserveinstances" false
+        FBXExporterSetParam "Preserveinstances" true
         FBXExporterSetParam "SelectionSetExport" false
         FBXExporterSetParam "GeomAsBone" false
         FBXExporterSetParam "ColladaTriangulate" true
@@ -978,15 +1371,17 @@ rollout M2B "Export Blender"
             )
         -----------------------------------------------------------------------------------	
         fbx = filepath + fbxname
-        exportMode = rb_export_mode.state
-        -- print exportMode
-        if exportMode > 1 then (
+
+        if export_mode == 1 then (
             exportFile fbx #noPrompt selectedOnly:true	usage:FBXEXP
         )else(
             exportFile fbx #noPrompt selectedOnly:false	usage:FBXEXP
         )
         
+        -- fetchMaxFile quiet:true
+
+        messageBox "导出成功，请在Blender中用插件导入" tiltle:"Red Halo M2B"
     )
 )
 
-createDialog M2B width:200 pos:[1500,50]
+createDialog M2B width:400
