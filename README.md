@@ -12,3 +12,4 @@
 ##### Blender
   下载RedHalo_Tools.zip,正常安装插件
   
+encryptScript <filename_string> [version:<int>] version为0或者1
