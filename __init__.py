@@ -138,11 +138,11 @@ def CreateNode(nodes, links, xmlPath, ParentNode, texmap_type):
     #### type       :节点类型
     '''
     texmap = xmlPath
-    # print(texmap_type)
+    
     _node = texmap.findall("./")
     
     # Bitmap 已完成
-    if texmap_type == "Bitmap" :
+    if texmap_type in ("Bitmap", "VRayBitmap") :
         bitmap_path = _node[0].text        
         # Scale
         uTile = float(texmap.attrib["U_Tiling"])
@@ -516,42 +516,54 @@ def CreateSingleMtl(nodes, links, xmlPath):
 
         texmap = node.attrib["Texmap"]
         texmap_type = texmap.split(":")[-1]   
-
+        
         texmap_node = xmlPath.find("./%s/" % path)
 
-        if path in ("Diffuse", "Emission"):
-            bsdfShader.inputs[input].default_value = ConvertColor(node.attrib["Color"])
-
-            if texmap_type in TextureClass :
-                CreateNode(nodes, links, texmap_node, bsdfShader.inputs[input], texmap_type)
+        default_value = None
         
-        elif path in ("Metallic", "Reflection", "Roughness", "Anisotropic", "AnisotropicRotation", "Coat", "CoatRoughness", "IOR", "Refraction", "EmissionStrength", "Bump", "Displacement") :
-            value = float(node.attrib["Amount"])
-            if path == "Roughness" and useRoughness == "false":
-                bsdfShader.inputs[input].default_value = 1 - value
+        parent_node = None
 
-                if texmap_type in TextureClass :
+        if path == "Displacement":
+            pass
+        else:
+            if "Color" in node.attrib:
+                default_value = ConvertColor(node.attrib["Color"])
+                parent_node = bsdfShader.inputs[input]
+            if "Amount" in node.attrib:
+                default_value = float(node.attrib["Amount"])                
+                parent_node = bsdfShader.inputs[input]
+            
+            if (path == "Roughness" and useRoughness == "false"):
+                default_value = 1 - default_value
+                if texmap_node:
                     InvertNode = nodes.new("ShaderNodeInvert")
                     links.new(InvertNode.outputs["Color"], bsdfShader.inputs[input])
-                    CreateNode(nodes, links, texmap_node, InvertNode.inputs["Color"], texmap_type)
-            elif path == "Bump" :
-                if texmap_type in TextureClass :
-                    if texmap_type in ("Bitmap", "Tiles", "Mix", "Falloff", "Color Correction", "RGB Multiply", "Gradient", "VRayDirt", "Gradient Ramp") :
-                        bumpShader = nodes.new("ShaderNodeBump")
-                        bumpShader.inputs["Strength"].default_value = 0.1
-                        links.new(bumpShader.outputs["Normal"], bsdfShader.inputs["Normal"])
-                        CreateNode(nodes, links, texmap_node, bumpShader.inputs["Height"], texmap_type)
-                    else :
-                        # pass
-                        CreateNode(nodes, links, texmap_node, bsdfShader.inputs["Normal"], texmap_type)
-            elif path == "RefractRoughness" :
-                bsdfShader.inputs[input].default_value = 1 - value                
-            elif path in ("Translucent", "Displacement") :
+
+                    parent_node = InvertNode.inputs["Color"]
+            elif path == "Bump":
+                if texmap_type in ("Bitmap", "Tiles", "Mix", "Falloff", "Color Correction", "RGB Multiply", "Gradient", "VRayDirt", "Gradient Ramp", "VRayBitmap") :
+                    bumpShader = nodes.new("ShaderNodeBump")
+                    bumpShader.inputs["Strength"].default_value = 0.3
+                    links.new(bumpShader.outputs["Normal"], bsdfShader.inputs["Normal"])
+
+                    parent_node = bumpShader.inputs["Height"]
+                else :
+                    NormapShader = nodes.new("ShaderNodeNormalMap")
+                    parent_node = NormapShader.inputs["Color"]
+            elif path == "Opacity":
+                default_value = default_value / 100
+
+            # 设置默认值
+            if path in ("Bump", "Translucent"):
                 pass
             else:
-                bsdfShader.inputs[input].default_value = value
-                if texmap_type in TextureClass :
-                    CreateNode(nodes, links, texmap_node, bsdfShader.inputs[input], texmap_type)
+                bsdfShader.inputs[input].default_value = default_value
+        
+            # 添加节点            
+            if texmap_node:
+                # print(input)
+                # print(texmap_node)
+                CreateNode(nodes, links, texmap_node, parent_node, texmap_type)
 
     return bsdfShader
 
@@ -560,6 +572,7 @@ class RedHalo_M2B_ImportSetting(bpy.types.PropertyGroup):
     importSetting :bpy.props.BoolProperty(name="导入Max设置", default=True, description = "导入Max设置")
     importLight :bpy.props.BoolProperty(name="导入灯光", default=True, description = "导入灯光")
     importCamera :bpy.props.BoolProperty(name="导入相机", default=True)
+    importAnimate :bpy.props.BoolProperty(name="导入动画", default=True)
     importProxy :bpy.props.BoolProperty(name="导入代理文件", default=True)
     importModel :bpy.props.BoolProperty(name="导入模型", default=True)
     importMaterial :bpy.props.BoolProperty(name="导入材质", default=True)
@@ -612,7 +625,8 @@ class Tools_OT_Max2Blender(Operator):
             print("========= 开始加载模型 Loading... =========")
             try:
                 FBXFile = import_path + "\\RH_M2B.fbx"
-                bpy.ops.import_scene.fbx(filepath=FBXFile, use_custom_normals=False, use_custom_props=False, use_anim=False)
+                use_anim = True if settings.importAnimate else False
+                bpy.ops.import_scene.fbx(filepath=FBXFile, use_custom_normals=False, use_custom_props=False, use_anim=use_anim)
                 # bpy.ops.import_scene.fbx(filepath='', directory='', filter_glob='*.fbx', files=None, ui_tab='MAIN', 
                 # use_manual_orientation=False, global_scale=1.0, bake_space_transform=False, 
                 # use_custom_normals=True, use_image_search=True, 
@@ -624,10 +638,62 @@ class Tools_OT_Max2Blender(Operator):
                 # use_prepost_rot=True, axis_forward='-Z', axis_up='Y')
             except:
                 return {'FINISHED'}
-                pass
             
             print("========= 模型加载完成 Ended =========")
         
+        # 把所有物体移动到新的集合中
+        import_name = xml_root.find("./Setting/File").text
+        Arch_Col = bpy.data.collections.new(import_name)
+        bpy.context.collection.children.link(Arch_Col)
+
+        objects_col = bpy.data.collections.new("Objects")
+        Arch_Col.children.link(objects_col)
+
+        for i in bpy.data.objects:
+            objects_col.objects.link(i)
+            bpy.context.collection.objects.unlink(i)
+
+        # 设置代理模型
+        if settings.importProxy :
+            proxy_list = xml_root.find("./Proxy")
+
+            proxy_col = bpy.data.collections.new("Proxy")
+            Arch_Col.children.link(proxy_col)
+
+            for p in proxy_list:
+                proxy_source = p.attrib["name"]
+                proxy_count = int(p.attrib["count"])
+                source_obj_name = proxy_source[23:]
+                _src_obj = bpy.data.objects[proxy_source]
+                me = bpy.data.objects[proxy_source].data
+                
+                empty_parent = bpy.data.objects.new((source_obj_name +"_Parent"), None)
+                _tmp_empty_obj = bpy.data.objects.new("TMPPROXY_Empty", None)
+                proxy_col.objects.link(empty_parent)
+
+                proxy_ins_item = p
+
+                for idx, item in enumerate(proxy_ins_item):
+                    item_name = item.attrib["name"]
+                    item_matrix = ConvertMatrix(item.attrib["matrix"])
+
+                    if idx < 7000:
+                        _tmp_obj = bpy.data.objects.new(item_name, me)
+                        _tmp_obj.display_type = "BOUNDS"
+                        _tmp_obj.matrix_world = item_matrix * fac
+                    else:
+                        _tmp_obj = _tmp_empty_obj.copy()
+                        _tmp_obj.empty_display_type = "CUBE"
+                        _tmp_obj.matrix_world = item_matrix * fac
+                        _tmp_obj.empty_display_size = 1/fac
+
+                    # bpy.context.collection.objects.link(_tmp_obj)
+                    proxy_col.objects.link(_tmp_obj)
+                    _tmp_obj.parent = empty_parent
+
+                #Delete Origin objects
+                bpy.data.objects.remove(_src_obj)
+
         # 设置自动平滑
         for i in bpy.data.meshes:
             i.use_auto_smooth = True
@@ -642,19 +708,25 @@ class Tools_OT_Max2Blender(Operator):
         # 设置相机
         if settings.importCamera :
             camera_xml = xml_root.find("./CameraList")
+
+            camera_col = bpy.data.collections.new("Camera")
+            Arch_Col.children.link(camera_col)
+
             for c in camera_xml.findall("./*") :
                 camera_name = c.attrib["name"]
                 camera_matrix = ConvertMatrix(c.attrib["matrix"])
                 camera_fov = c.attrib["fov"]
+                camera_clip = c.attrib["clip"]
                 camera_near = c.attrib["near"]
                 camera_far = c.attrib["far"]
 
-                camera_data = bpy.data.cameras.new(name='Camera')
+                camera_data = bpy.data.cameras.new(name='Cameras')
                 camera_object = bpy.data.objects.new(camera_name, camera_data)
-                bpy.context.scene.collection.objects.link(camera_object)
+                camera_col.objects.link(camera_object)
                 camera_object.data.angle = float(camera_fov)/180 * pi
-                camera_object.data.clip_start = float(camera_near) * fac
-                camera_object.data.clip_end = float(camera_far) * fac           
+                if camera_clip == "true":
+                    camera_object.data.clip_start = float(camera_near) * fac
+                    camera_object.data.clip_end = float(camera_far) * fac           
 
                 camera_object.matrix_world = camera_matrix * fac
                 camera_object.scale = (1, 1, 1)
@@ -662,6 +734,9 @@ class Tools_OT_Max2Blender(Operator):
         # 设置灯光
         if settings.importLight :
             print("========= 加载灯光设置 Loading... =========")
+
+            light_col = bpy.data.collections.new("Lights")
+            Arch_Col.children.link(light_col)
 
             light_xml = xml_root.find("./LightList")
             # c = light_xml.getchildren()
@@ -697,7 +772,7 @@ class Tools_OT_Max2Blender(Operator):
                 elif L_Type == "SPOT" :
                     pass
 
-                bpy.context.scene.collection.objects.link(light_obj)
+                light_col.objects.link(light_obj)
 
                 light_obj.matrix_world = matrix * fac
                 light_obj.scale *= 1 / fac
@@ -725,7 +800,7 @@ class Tools_OT_Max2Blender(Operator):
                 
                 m = xml_root.find("./MaterialList/*/[@name='%s']" % material_name)
 
-                # print(material_name)
+                print(material_name)
                 if m :
                     try:
                         nodes.clear()
@@ -857,7 +932,7 @@ class VIEW3D_PT_RedHaloM3B(bpy.types.Panel):
     def draw(self, context):
         settings = context.scene.rh_m2b_settings
         layout = self.layout
-        version = "2022-02-22"
+        version = "2022-02-27"
 
         # layout.prop(settings, "newfile")
         layout.label(text="当前版本：" + version , icon='QUESTION')
