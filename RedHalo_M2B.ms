@@ -5,10 +5,16 @@
  * @Last Modified time: 2022-03-28 22:38:55
  */
 
- macroScript RedHalo_Tools
- category:"Red Halo"
- toolTip:"Red Halo Export2Blender"
+ --macroScript RedHalo_Tools
+ --category:"Red Halo"
+ --toolTip:"Red Halo Export2Blender"
 (
+    _version = "0.3"
+    _author = "RedHalo Studio(发霉的红地蛋)"
+    _data = "2022-03-30"
+    _copyright = "(c) 2022 RedHalo Studio. All rights reserved."
+    _title = "RedHalo Max2Blender"
+
     -- 获取场景中所有材质，包括子材质。
     function GetSceneMaterials = 
     (
@@ -109,6 +115,16 @@
             replaceinstances i _t
         )
 
+        for i in getClassInstances VRayBitmap do (
+            print "3.>>>>>"
+            
+            for f in refs.dependents i do (
+                print (classof f)
+            )
+        )
+
+
+
         /*
         for mat in getClassInstances VRayMtl do (
             for p in getPropNames VRayMtl do (
@@ -185,6 +201,90 @@
         registry.setValue key1 subkey #REG_SZ val
     )
 
+    function CleanupTexture tex =
+    (
+        type = classof tex
+        
+        case type of (
+            Mask:(
+                -- print tex
+                map = tex.map
+                tex.map = CleanupTexture map
+                tex.mask = CleanupTexture tex.mask
+            )
+            Bitmaptexture:(
+                -- print tex.filename
+                filename = tex.filename
+
+                if filename == undefined do (
+                    tex = undefined
+                )
+
+                tex_name = tex.name
+                tex_mode_on = tex.apply
+                tex_clip_width = tex.clipw
+                tex_clip_height = tex.cliph
+
+                filepath = getFilenamePath tex.HDRIMapName
+                filename = getFilenameFile tex.HDRIMapName
+                filetype = getFilenameType tex.HDRIMapName
+                
+                bm = undefined
+
+                if tex_mode_on or ( tex_clip_width < 1 or tex_clip_height < 1 ) then (
+                    newfile = filepath + filename + "_crop" + filetype
+                    nb = renderMap tex size:[512, 512] filename:newfile
+                    
+                    try(save nb)catch()
+                    close nb
+                    
+                    bm = Bitmaptexture filename:newfile
+                    bm.name = tex_name
+                    tex = bm
+                )
+            )
+            VRayBitmap:(
+                -- print tex.HDRIMapName
+                tex_name = tex.name
+                tex_mode_on = tex.cropplace_on
+                tex_mode_type = tex.cropplace_mode
+                tex_clip_width = tex.cropplace_width
+                tex_clip_height = tex.cropplace_height
+                
+                filepath = getFilenamePath tex.HDRIMapName
+                filename = getFilenameFile tex.HDRIMapName
+                filetype = getFilenameType tex.HDRIMapName
+                
+                bm = undefined
+                
+                if tex.HDRIMapName == undefined then (				
+                    tex = undefined
+                )
+                
+                if tex_mode_on or (tex_clip_width < 1 or tex_clip_height < 1) then (
+                    newfile = filepath + filename + "_crop" + filetype
+                    nb = renderMap tex size:[512, 512] filename:newfile
+                    
+                    try(save nb)catch()
+                    close nb
+                    
+                    bm = Bitmaptexture filename:newfile
+                    bm.name = tex_name
+                    
+                ) else (	
+                    bm = Bitmaptexture filename:tex.HDRIMapName
+                    bm.name = tex_name
+                )			
+                
+                replaceInstances tex bm
+                tex = bm
+            )
+            default: (
+                tex = undefined
+            )
+        )
+        return tex
+    )
     /*
     *    UI
     */
@@ -496,14 +596,14 @@
                     return texture
                 )
                 VRayBitmap:(
+                    print "1.>>>>>"
                     if texture.HDRIMapname != undefined then (
-                        bm = Bitmaptexture filename:texture.HDRIMapname
+                        return texture
                     )else(
                         return undefined
                     )
                 )
                 VRayEdgesTex:(
-                    print texture.name
                     return undefined
                 )
                 default:(
@@ -837,8 +937,14 @@
                     CreateElement xmlDoc MapBumpNode MapBump
                 )
                 VRayBitmap:(
-                    bm = Bitmaptexture filename:texture.HDRIMapName
-                    CreateBitmapNode xmlDoc ParentNode bm
+                    print "2.>>>>>>"
+                    if texture.HDRIMapName != undefined then (
+                        bm = Bitmaptexture filename:texture.HDRIMapName
+                        CreateBitmapNode xmlDoc ParentNode bm
+                    ) else (
+                        bm = undefined
+                    )
+                    
                 )
             )
         )
@@ -1306,7 +1412,7 @@
 
             -- holdMaxFile()
             SceneMaterial = GetSceneMaterials()
-            print ("当前场景中共有" + SceneMaterial.count as string)
+            print ("当前场景中共有 " + SceneMaterial.count as string + " 个材质")
             -- 场景清理
             DuplicateObjectNam()
             CleanUpMaterials()
@@ -1339,306 +1445,224 @@
             -- MakeUniqueMaterialName()
             
             -- for cls in material.classes do (
-            for cls in SceneMaterial do (
-                --------------------------------
-                ------ 复合材质列表
-                -- Vray2SidedMtl List
+            for i in SceneMaterial do (
+                cls = classof i
                 if cls == VRay2SidedMtl do (
-                    for i in getClassInstances VRay2SidedMtl do (
-                        UsedMaterial = false
-                        for m in refs.dependents i do (
-                            if superClassOf m == GeometryClass do (
-                                UsedMaterial = true
-                                break
-                            )
-                        )
-                        
-                        if UsedMaterial do (
-                            SideMtl = xmlDoc.createElement "DoubleSideMtl"
-                            MaterialList.appendChild sideMtl
+                    SideMtl = xmlDoc.createElement "DoubleSideMtl"
+                    MaterialList.appendChild sideMtl
 
-                            sideMtl.setAttribute "name" i.name
-                            for p in (getPropNames i) do (
-                                att = getProperty i p
-                                sideMtl.setAttribute p (att as string)
+                    sideMtl.setAttribute "name" i.name
+                    for p in (getPropNames i) do (
+                        att = getProperty i p
+                        sideMtl.setAttribute p (att as string)
 
-                                CreateElement xmlDoc sideMtl att
-                            )
-                        )
+                        CreateElement xmlDoc sideMtl att
                     )
                 )
                 -- VrayOverrideMtl List
                 if cls == VRayOverrideMtl do (
-                    for i in getClassInstances VrayOverrideMtl do (
-                        UsedMaterial = false
-                        for m in refs.dependents i do (
-                            if superClassOf m == GeometryClass do (
-                                UsedMaterial = true
-                                break
-                            )
-                        )
+                    OverrideMtl = xmlDoc.createElement "OverrideMtl"
+                    MaterialList.appendChild OverrideMtl
+                    -- VrayOverrideMtl, baseMtl, baseMtl_on, giMtl, gimtl_on, reflectMtl, reflectmtl_on, refractMtl, refractmtl_on, shadowMtl, shadowMtl_on
+                    -- CoronaRaySwitchMtl giMtl, reflectMtl, refractMtl, directMtl, displacementSource, viewportSource
+                    OverrideMtl.setAttribute "name" i.name
 
-                        if UsedMaterial do (
-                            OverrideMtl = xmlDoc.createElement "OverrideMtl"
-                            MaterialList.appendChild OverrideMtl
-                            -- VrayOverrideMtl, baseMtl, baseMtl_on, giMtl, gimtl_on, reflectMtl, reflectmtl_on, refractMtl, refractmtl_on, shadowMtl, shadowMtl_on
-                            -- CoronaRaySwitchMtl giMtl, reflectMtl, refractMtl, directMtl, displacementSource, viewportSource
-                            OverrideMtl.setAttribute "name" i.name
-
-                            for p in getPropNames i do (
-                                att = getProperty i p
-                                OverrideMtl.setAttribute p (att as string)
-                            )
-                        )
+                    for p in getPropNames i do (
+                        att = getProperty i p
+                        OverrideMtl.setAttribute p (att as string)
                     )
                 )
-                -----复合材质列表 结束
-                -----------------------
 
-                ------------------------
-                ------ 基础材质节点列表
                 -- VrayMtl List
-                if cls == VRayMtl do (
-                    for i in getClassInstances VrayMtl do (
+                if cls == VRayMtl do (                   
+                    SingleMtl = xmlDoc.createElement "SingleMtl"
+                    MaterialList.appendChild singleMtl
 
-                        -- 只把场景中使用的材质导出
-                        usedMaterial = false
-                        for v in refs.dependents i do (
-                            if superClassOf v == GeometryClass do (
-                                usedMaterial = true
-                                break
-                            )
-                        )
+                    SingleMtl.setAttribute "name" i.name
+                    useRoughness = getProperty i "brdf_useRoughness"
+                    SingleMtl.setAttribute "useRoughness" (useRoughness as string)
 
-                        if usedMaterial do (
-                            SingleMtl = xmlDoc.createElement "SingleMtl"
-                            MaterialList.appendChild singleMtl
+                    -- LockIOR使用折射的IOR，否则就使用反射的IOR
+                    lockIOR = true
+                    lockIOR = getProperty i "reflection_lockior"
+                    ior = 1.6
+                    metallic_value = 0
+                    useIOR = getProperty i "reflection_fresnel"
+                        
+                    if lockIOR then (
+                        ior = getProperty i "refraction_ior"
+                    )else(
+                        ior = getProperty i "reflection_ior"
+                    )
 
-                            SingleMtl.setAttribute "name" i.name
-                            useRoughness = getProperty i "brdf_useRoughness"
-                            SingleMtl.setAttribute "useRoughness" (useRoughness as string)
+                    if useIOR == false then (
+                        ior = 3
+                    ) 
 
-                            -- LockIOR使用折射的IOR，否则就使用反射的IOR
-                            lockIOR = true
-                            lockIOR = getProperty i "reflection_lockior"
-                            ior = 1.6
-                            metallic_value = 0
-                            useIOR = getProperty i "reflection_fresnel"
+                    -- 如果IOR值高于5，设置Metallic为真
+                    if ior > 5 then (
+                        metallic_value = 1.0
+                        ior = 1.6
+                    )
+
+                    for idx = 1 to NodeNames.count do (
+                        propName = NodeNames[idx]
+
+                        _node = xmlDoc.CreateElement propName
+                        SingleMtl.appendChild _node
+
+                        PropsArray = VR_PropsArray[idx]
+                        NodeName = NodeAttribNames[idx]
+
+                        num = 0
+                                            
+                        for prop in PropsArray do (
+                            num += 1
+                            value = ""
+                            texture = getProperty i prop
+                            value = texture 
                                 
-                            if lockIOR then (
-                               ior = getProperty i "refraction_ior"
-                            )else(
-                                ior = getProperty i "reflection_ior"
+                            if (prop == "Reflection") or (prop == "Refraction") or (prop == "sheen_color") do (
+                                value = (texture.v / 255.0) 
                             )
 
-                            if useIOR == false then (
-                                ior = 3
-                            ) 
-
-                            -- 如果IOR值高于5，设置Metallic为真
-                            if ior > 5 then (
-                                metallic_value = 1.0
-                                ior = 1.6
+                            -- 设置IOR值
+                            if (prop == "reflection_ior") do (
+                                value = ior
                             )
-
-                            for idx = 1 to NodeNames.count do (
-                                propName = NodeNames[idx]
-
-                                _node = xmlDoc.CreateElement propName
-                                SingleMtl.appendChild _node
-
-                                PropsArray = VR_PropsArray[idx]
-                                NodeName = NodeAttribNames[idx]
-
-                                num = 0
-                                                    
-                                for prop in PropsArray do (
-                                    num += 1
-                                    value = ""
-                                    texture = getProperty i prop
-                                    value = texture 
-                                        
-                                    if (prop == "Reflection") or (prop == "Refraction") or (prop == "sheen_color") do (
-                                        value = (texture.v / 255.0) 
-                                    )
-
-                                    -- 设置IOR值
-                                    if (prop == "reflection_ior") do (
-                                        value = ior
-                                    )
-                                    -- 设置Metallic
-                                    if (prop == "reflection_metalness") do (
-                                        value = metallic_value
-                                    )
-                                    
-                                    _node.setAttribute NodeName[num] (value as string)
-                                    
-                                    CreateElement xmlDoc _node texture
-                                )
+                            -- 设置Metallic
+                            if (prop == "reflection_metalness") do (
+                                value = metallic_value
                             )
+                            
+                            _node.setAttribute NodeName[num] (value as string)
+                            
+                            CreateElement xmlDoc _node texture
                         )
                     )
                 )
 
                 -- VRayLightMtl
                 if cls == VRayLightMtl do (
-                    for i in getClassInstances VrayLightMtl do (
-                        UsedMaterial = false
-                        for m in refs.dependents i do (
-                            if superClassOf m == GeometryClass do (
-                                UsedMaterial = true
-                                break
-                            )
-                        )
+                    LightMtl = xmlDoc.CreateElement "LightMtl"
+                    MaterialList.appendChild LightMtl
+                    LightMtl.setAttribute "name" i.name
 
-                        if UsedMaterial do (
-                            LightMtl = xmlDoc.CreateElement "LightMtl"
-                            MaterialList.appendChild LightMtl
-                            LightMtl.setAttribute "name" i.name
+                    --VrayLightProps = #( "color" ,"multiplier" ,"texmap" ,"texmap_on" ,"twoSided" ,"compensate_exposure" ,"opacity_multiplycolor" ,"opacity_texmap" ,"opacity_texmap_on" ,"directLight_on" ,"directLight_subdivs" ,"directLight_cutoffThreshold" ,"displacement_multiplier" ,"displacement_texmap" ,"displacement_texmap_on" ,"texmap_resolution" ,"texmap_adaptiveness"
+                    VrayLightProps = #("color" ,"multiplier" ,"texmap" , "texmap_on", "opacity_texmap" , "opacity_texmap_on", "twoSided")  
 
-                            --VrayLightProps = #( "color" ,"multiplier" ,"texmap" ,"texmap_on" ,"twoSided" ,"compensate_exposure" ,"opacity_multiplycolor" ,"opacity_texmap" ,"opacity_texmap_on" ,"directLight_on" ,"directLight_subdivs" ,"directLight_cutoffThreshold" ,"displacement_multiplier" ,"displacement_texmap" ,"displacement_texmap_on" ,"texmap_resolution" ,"texmap_adaptiveness"
-                            VrayLightProps = #("color" ,"multiplier" ,"texmap" , "texmap_on", "opacity_texmap" , "opacity_texmap_on", "twoSided")  
-
-                            --for idx = 1 to NodeNames.count do (
-                            for p in VrayLightProps do (
-                                att = getProperty i p
-                                LightMtl.setAttribute p (att as string)
-                                
-                            )
-
-                            LightMap = xmlDoc.CreateElement "Lightmap"
-                            LightMtl.appendChild Lightmap
-                            tex = getProperty i "texmap" 
-                            CreateElement xmlDoc LightMap tex
-
-                            OpacityMap = xmlDoc.CreateElement "Opacitymap"
-                            LightMtl.appendChild OpacityMap
-                            tex = getProperty i "opacity_texmap"
-                            CreateElement xmlDoc OpacityMap tex
-                        )
+                    --for idx = 1 to NodeNames.count do (
+                    for p in VrayLightProps do (
+                        att = getProperty i p
+                        LightMtl.setAttribute p (att as string)
+                        
                     )
+
+                    LightMap = xmlDoc.CreateElement "Lightmap"
+                    LightMtl.appendChild Lightmap
+                    tex = getProperty i "texmap" 
+                    CreateElement xmlDoc LightMap tex
+
+                    OpacityMap = xmlDoc.CreateElement "Opacitymap"
+                    LightMtl.appendChild OpacityMap
+                    tex = getProperty i "opacity_texmap"
+                    CreateElement xmlDoc OpacityMap tex
                 )
 
                 -- CoronaMtl
                 -- CoronaLegacyMtl
                 if cls == CoronaMtl do (
-                    for i in getClassInstances CoronaMtl do (
-                        UsedMaterial = false
-                        for m in refs.dependents i do (
-                            if superClassof m == GeometryClass do (
-                                UsedMaterial = true
-                                break
+                    SingleMtl = xmlDoc.createElement "SingleMtl"
+                    MaterialList.appendChild singleMtl
+
+                    SingleMtl.setAttribute "name" i.name
+
+                    for idx = 1 to NodeNames.count do (
+                        NodeName = NodeNames[idx]
+
+                        node = xmlDoc.CreateElement NodeName
+                        SingleMtl.appendChild node
+
+                        PropsArray = CR_NodeProps[idx]
+                        NodeName = NodeAttribNames[idx]
+
+                        num = 0
+
+                        for prop in PropsArray do (
+                            num += 1
+                            value = ""
+                            texture = getProperty i prop
+                            value = texture 
+                            
+                            if (prop == "colordiffuse") do (
+                                fac = getProperty i #levelDiffuse
+                                value *= fac
                             )
-                        )
-
-                        if UsedMaterial do (
-                            SingleMtl = xmlDoc.createElement "SingleMtl"
-                            MaterialList.appendChild singleMtl
-
-                            SingleMtl.setAttribute "name" i.name
-
-                            for idx = 1 to NodeNames.count do (
-                                NodeName = NodeNames[idx]
-
-                                node = xmlDoc.CreateElement NodeName
-                                SingleMtl.appendChild node
-
-                                PropsArray = CR_NodeProps[idx]
-                                NodeName = NodeAttribNames[idx]
-
-                                num = 0
-
-                                for prop in PropsArray do (
-                                    num += 1
-                                    value = ""
-                                    texture = getProperty i prop
-                                    value = texture 
-                                    
-                                    if (prop == "colordiffuse") do (
-                                        fac = getProperty i #levelDiffuse
-                                        value *= fac
-                                    )
-                                    
-                                    if (prop == "colorreflect") do (
-                                        fac = getProperty i #levelReflect
-                                        value = (texture.v / 255.0) * fac
-                                    )
-                                    
-                                    if (prop == "colorrefract") do (
-                                        fac = getProperty i #levelrefract
-                                        value = (texture.v / 255.0) * fac
-                                    )
-                                    
-                                    if (prop == "colorOpacity") do (
-                                        fac = getProperty i #levelOpacity
-                                        value  *= fac
-                                    )
-
-                                    -- 设置IOR值
-                                    if (prop == "reflection_ior") do (
-                                        -- value = ior
-                                    )
-                                    -- 设置Metallic
-                                    if (prop == "reflection_metalness") do (
-                                        -- value = metallic_value
-                                    )
-
-                                    _node.setAttribute NodeName[num] (value as string)
-                                    
-                                    CreateElement xmlDoc _node texture
-                                )
+                            
+                            if (prop == "colorreflect") do (
+                                fac = getProperty i #levelReflect
+                                value = (texture.v / 255.0) * fac
                             )
+                            
+                            if (prop == "colorrefract") do (
+                                fac = getProperty i #levelrefract
+                                value = (texture.v / 255.0) * fac
+                            )
+                            
+                            if (prop == "colorOpacity") do (
+                                fac = getProperty i #levelOpacity
+                                value  *= fac
+                            )
+
+                            -- 设置IOR值
+                            if (prop == "reflection_ior") do (
+                                -- value = ior
+                            )
+                            -- 设置Metallic
+                            if (prop == "reflection_metalness") do (
+                                -- value = metallic_value
+                            )
+
+                            _node.setAttribute NodeName[num] (value as string)
+                            
+                            CreateElement xmlDoc _node texture
                         )
                     )
                 )
                 -- CoronaLightMtl
                 if cls == CoronaLightMtl do (
-                    for i in getClassInstances CoronaLightMtl do (
-                        UsedMaterial = false
-                        for m in refs.dependents i do (
-                            if superClassof m == GeometryClass do (
-                                UsedMaterial = true
-                                break
-                            )
-                        )
+                    LightMtl = xmlDoc.CreateElement "LightMtl"
+                    MaterialList.appendChild LightMtl
+                    LightMtl.setAttribute "name" i.name
 
-                        if UsedMaterial do (
-                            LightMtl = xmlDoc.CreateElement "LightMtl"
-                            MaterialList.appendChild LightMtl
-                            LightMtl.setAttribute "name" i.name
-
-                            --LigthProp = #(#intensity, #texmapOn, #texmap, #color, #affectAlpha, #occludeOther, #emitLight, #visibleRefl, #visibleDirect, #visibleRefract, #opacitytexmap, 
-                            --            #opacityTexmapOn, #directionality, #excludeList, #excludeListIncludeMod, #visibleInMasks, #shadowcatcherIlluminator, #twosidedEmission, #legacyMode, #displayWire, \
-                            --            #gBufferOverride, #nondirectionalFake, #visibleCaustics )
-                            LightAttNames = #("color" ,"multiplier" ,"texmap" , "texmap_on", "opacity_texmap" ,"opacity_texmap_on","twoSided")    
-                            LightProps = #(#color, #intensity, #texmap, #texmapOn, #opacitytexmap, #opacityTexmapOn, #twosidedEmission)
-                            
-                            for c = 1 to LightProps.count do (
-                                att_name = LightAttNames[c]
-                                p = LightProps[c]
-                                att = getProperty i p
-                                -- if p == 
-                                LightMtl.setAttribute att_name (att as string)
-                            )
-
-                            LightMap = xmlDoc.CreateElement "Lightmap"
-                            LightMtl.appendChild Lightmap
-                            tex = getProperty i "texmap"
-                            CreateElement xmlDoc LightMap tex
-
-                            OpacityMap = xmlDoc.CreateElement "Opacitymap"
-                            LightMtl.appendChild OpacityMap
-                            tex = getProperty i "opacitytexmap"
-                            CreateElement xmlDoc OpacityMap tex
-                        )
+                    --LigthProp = #(#intensity, #texmapOn, #texmap, #color, #affectAlpha, #occludeOther, #emitLight, #visibleRefl, #visibleDirect, #visibleRefract, #opacitytexmap, 
+                    --            #opacityTexmapOn, #directionality, #excludeList, #excludeListIncludeMod, #visibleInMasks, #shadowcatcherIlluminator, #twosidedEmission, #legacyMode, #displayWire, \
+                    --            #gBufferOverride, #nondirectionalFake, #visibleCaustics )
+                    LightAttNames = #("color" ,"multiplier" ,"texmap" , "texmap_on", "opacity_texmap" ,"opacity_texmap_on","twoSided")    
+                    LightProps = #(#color, #intensity, #texmap, #texmapOn, #opacitytexmap, #opacityTexmapOn, #twosidedEmission)
+                    
+                    for c = 1 to LightProps.count do (
+                        att_name = LightAttNames[c]
+                        p = LightProps[c]
+                        att = getProperty i p
+                        -- if p == 
+                        LightMtl.setAttribute att_name (att as string)
                     )
-                )
-                
+
+                    LightMap = xmlDoc.CreateElement "Lightmap"
+                    LightMtl.appendChild Lightmap
+                    tex = getProperty i "texmap"
+                    CreateElement xmlDoc LightMap tex
+
+                    OpacityMap = xmlDoc.CreateElement "Opacitymap"
+                    LightMtl.appendChild OpacityMap
+                    tex = getProperty i "opacitytexmap"
+                    CreateElement xmlDoc OpacityMap tex
+                )                
             )
             -- if et_folder.text != "" do export_path = et_folder.text
-            -- print export_path
-            xmlDoc.Save (export_path + xmlname)
-            xmlDoc.Save ("D:\\xml_Temp.xml") --测试文件，方便查看
+            try(xmlDoc.Save (export_path + xmlname))catch()
+            try(xmlDoc.Save ("D:\\xml_Temp.xml"))catch() --测试文件，方便查看
             xmlDoc = undefined
             
             --------FBX EXPORT-----
@@ -1672,44 +1696,23 @@
             FBXExporterSetParam "GenerateLog" false
             --FBX File Format----------------------------------------------------------------
             FBXExporterSetParam "ASCII" false
-            if  MaxVer < 14000 then 
+            case MaxVer of 
             (
-                FBXExporterSetParam "FileVersion" "FBX200600"
-            )		
-            else 
-                (
-                    case MaxVer of 
-                    (
-                        -- 3dsmax2018
-                        20000: (
-                                FBXExporterSetParam "FileVersion" "FBX201800"
-                                )
-                        -- 3dsmax2017
-                        19000: (
-                                FBXExporterSetParam "FileVersion" "FBX201700"
-                                )
-                        -- 3dsmax2016
-                        18000: (
-                                FBXExporterSetParam "FileVersion" "FBX201600"
-                                )
-                        -- 3dsmax2015
-                        17000: (
-                                FBXExporterSetParam "FileVersion" "FBX201500"
-                                )
-                        -- 3dsmax2014
-                        16000: (
-                                FBXExporterSetParam "FileVersion" "FBX201400"
-                                )
-                        -- 3dsmax2013
-                        15000: (
-                                FBXExporterSetParam "FileVersion" "FBX201300"
-                                )
-                        -- 3dsmax2012
-                        14000: (
-                                FBXExporterSetParam "FileVersion" "FBX201200"
-                                )				
-                    )		
-                )
+                -- 3dsmax 2022
+                24000: ( FBXExporterSetParam "FileVersion" "FBX202200" )
+                -- 3dsmax 2021
+                23000: ( FBXExporterSetParam "FileVersion" "FBX202100" )
+                -- 3dsmax 2020
+                22000: ( FBXExporterSetParam "FileVersion" "FBX202000" )
+                -- 3dsmax 2019
+                21000: ( FBXExporterSetParam "FileVersion" "FBX201900" )
+                -- 3dsmax 2018
+                20000: ( FBXExporterSetParam "FileVersion" "FBX201800" )
+                -- 3dsmax 2017
+                19000: ( FBXExporterSetParam "FileVersion" "FBX201700" )
+                -- 3dsmax 2016
+                18000: ( FBXExporterSetParam "FileVersion" "FBX201600" )	
+            )
             -----------------------------------------------------------------------------------	
             fbx = export_path + fbxname
 
@@ -1720,7 +1723,6 @@
             )
             
             -- fetchMaxFile quiet:true
-
             messageBox "导出成功，请在Blender中用插件导入" tiltle:"Red Halo M2B"
         )
     )
