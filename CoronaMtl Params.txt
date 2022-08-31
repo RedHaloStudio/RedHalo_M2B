@@ -1,74 +1,109 @@
+=== Diffuse
 #colordiffuse - Color 
-#colorreflect - Color 
-#colorrefract - Color 
-#colorOpacity - Color 
-#colorTranslucency - Color 
-#COLORSELFILLUM - Color 
 #levelDiffuse - Float 
+#texmapDiffuse - UndefinedClass
+#mapAmountDiffuse - Float 
+
+#texmapOnDiffuse - BooleanClass 
+
+=== Reflection
 #levelReflect - Float 
-#levelrefract - Float 
-#levelOpacity - Float 
-#levelTranslucency - Float 
-#LEVELSELFILLUM - Float 
-#texmapDiffuse - UndefinedClass 
-#texmapReflect - UndefinedClass 
-#texmapReflectGlossiness - UndefinedClass 
-#texmapRefract - UndefinedClass 
-#texmapRefractGlossiness - UndefinedClass 
-#texmapOpacity - UndefinedClass 
-#texmapBump - UndefinedClass 
-#texmaptranslucency - UndefinedClass 
-#texmapreflectanisotropy - UndefinedClass 
-#texmapreflectanisotropyrotation - UndefinedClass 
-#texmapIor - UndefinedClass 
-#texmapfresnelior - UndefinedClass 
-#texmapdisplace - UndefinedClass 
+#colorreflect - Color 
+#texmapReflect - UndefinedClass
+#mapamountReflect - Float
+#texmapOnReflect - BooleanClass 
+
 #texmapreflectbgoverride - UndefinedClass 
 #texmaprefractbgoverride - UndefinedClass 
-#texmapSelfIllum - UndefinedClass 
-#texmapOnDiffuse - BooleanClass 
-#texmapOnReflect - BooleanClass 
-#texmapOnRefract - BooleanClass 
-#texmapOnReflectGlossiness - BooleanClass 
-#texmapOnRefractGlossiness - BooleanClass 
-#texmapOnOpacity - BooleanClass 
-#texmapOnBump - BooleanClass 
-#texmapOnTranslucency - BooleanClass 
-#texmapOnAnisotropy - BooleanClass 
-#texmapOnAnisotropyRotation - BooleanClass 
-#texmapOnIor - BooleanClass 
-#texmapOnFresnelIor - BooleanClass 
-#texmapondisplacement - BooleanClass 
-#texmapOnReflectBgOverride - BooleanClass 
-#texmapOnRefractBgOverride - BooleanClass 
-#texmapOnSelfIllum - BooleanClass 
-#mapAmountDiffuse - Float 
-#mapamountReflect - Float 
-#mapamountRefract - Float 
-#mapamountReflectGlossiness - Float 
-#mapamountRefractGlossiness - Float 
-#mapamountOpacity - Float 
-#mapamountBump - Float 
-#mapamountTranslucency - Float 
-#mapamountAnisotropy - Float 
-#mapamountAnisotropyRotation - Float 
-#mapamountIor - Float 
-#mapamountFresnelIor - Float 
-#mapamountSelfIllum - Float 
+
+=== Roughness
 #reflectGlossiness - Float 
-#refractGlossiness - Float 
-#fresnelIor - Float 
-#ior - Float 
+#texmapOnReflectGlossiness - BooleanClass
+#texmapReflectGlossiness - UndefinedClass 
+#mapamountReflectGlossiness - Float 
+
 #absorptionDistance - Float 
 #absorptionColor - Color 
-#bsdf - Integer 
+
+=== Anisotropic
 #anisotropy - Float 
+#texmapreflectanisotropy - UndefinedClass 
+#mapamountAnisotropy - Float
+
+#texmapOnAnisotropy - BooleanClass 
+
+=== AnisotropicRotation
 #anisotropyRotation - Float 
-#alphaMode - Integer 
-#gBufferOverride - Integer 
+#texmapreflectanisotropyrotation - UndefinedClass 
+#texmapOnAnisotropyRotation - BooleanClass 
+#mapamountAnisotropyRotation - Float 
+
+=== Sheen
+=== Coat
+=== CoatRoughness
+=== IOR
+#fresnelIor - Float 
+#ior - Float 
+#texmapIor - UndefinedClass
+#texmapfresnelior - UndefinedClass 
+#texmapOnIor - BooleanClass 
+#texmapOnFresnelIor - BooleanClass 
+#mapamountIor - Float 
+#mapamountFresnelIor - Float 
+
+=== Refraction
+#colorrefract - Color 
+#levelrefract - Float
+#texmapRefract - UndefinedClass 
+#mapamountRefract - Float 
+
+#texmapOnRefract - BooleanClass 
+
+=== Refraction Roughness
+#refractGlossiness - Float
+#texmapRefractGlossiness - UndefinedClass 
+#texmapOnRefractGlossiness - BooleanClass 
+#mapamountRefractGlossiness - Float
+
+=== Emission
+#COLORSELFILLUM - Color 
+#LEVELSELFILLUM - Float 
+#texmapSelfIllum - UndefinedClass 
+#texmapOnSelfIllum - BooleanClass 
+#mapamountSelfIllum - Float 
+
+=== EmissionStrength
+
+=== Opacity
+#colorOpacity - Color 
+#texmapOpacity - UndefinedClass 
+#levelOpacity - Float 
+#mapamountOpacity - Float
+
+#texmapOnOpacity - BooleanClass 
+
+=== Bump
+#texmapBump - UndefinedClass 
+#mapamountBump - Float
+#texmapOnBump - BooleanClass 
+
+=== Translucency
+#colorTranslucency - Color 
+#texmaptranslucency - UndefinedClass
+#levelTranslucency - Float 
+#mapamountTranslucency - Float 
+
+#texmapOnTranslucency - BooleanClass 
+
+=== Displacement
+#texmapdisplace - UndefinedClass 
 #displacementMinimum - Float 
 #displacementWaterLevel - Float 
 #displacementMaximum - Float 
+#texmapondisplacement - BooleanClass 
+
+#bsdf - Integer 
+#alphaMode - Integer 
 #thin - BooleanClass 
 #caustics - BooleanClass 
 #texmaptranslucencyfraction - UndefinedClass 
@@ -103,10 +138,193 @@
 #mapamountSssRadius - Float 
 #texmapOnSssScatterColor - BooleanClass 
 #texmapsssscattercolor - UndefinedClass 
-#mapamountSssScatterColor - Float 
-#materialLibraryId - UndefinedClass 
-#mediaMode - Integer 
-#renderElementPropagation - Integer 
+#mapamountSssScatterColor - Float
+#mediaMode
+
+
+==============================================================================================
+==============================================================================================
+==============================================================================================
+
+=== Diffuse
+#baseColor
+#baseLevel
+#baseTexmap
+#baseTexmapOn
+#baseMapAmount
+
+=== Metallic
+#metalnessMode
+#metalnessTexmap
+#metalnessTexmapOn
+
+=== Reflection
+
+=== Roughness
+#baseRoughness
+#baseRoughnessTexmap
+#baseRoughnessTexmapOn
+#baseRoughnessMapAmount
+
+=== Anisotropic
+#baseAnisotropy
+#baseAnisotropyTexmap
+#baseAnisotropyTexmapOn
+#baseAnisotropyMapAmount
+#anisotropyOrientationMode
+#anisotropyOrientationUvwChannel
+
+=== AnisotropicRotation
+#baseAnisoRotation
+#baseAnisoRotationTexmap
+#baseAnisoRotationTexmapOn
+#baseAnisoRotationMapAmount
+
+=== Sheen
+#sheenAmount
+#sheenAmountTexmap
+#sheenAmountTexmapOn
+#sheenAmountMapAmount
+#sheenColor
+#sheenColorTexmap
+#sheenColorTexmapOn
+#sheenColorMapAmount
+#sheenRoughness
+#sheenRoughnessTexmap
+#sheenRoughnessTexmapOn
+#sheenRoughnessMapAmount
+
+=== Coat
+#clearcoatAmount
+#clearcoatAmountTexmap
+#clearcoatAmountTexmapOn
+#clearcoatAmountMapAmount
+#clearcoatIor
+#clearcoatIorTexmap
+#clearcoatIorTexmapOn
+#clearcoatIorMapAmount
+
+=== CoatRoughness
+#clearcoatRoughness
+#clearcoatRoughnessTexmap
+#clearcoatRoughnessTexmapOn
+#clearcoatRoughnessMapAmount
+#clearcoatAbsorptionColor
+#clearcoatAbsorptionTexmap
+#clearcoatAbsorptionTexmapOn
+#clearcoatAbsorptionMapAmount
+#clearcoatBumpTexmap
+#clearcoatBumpTexmapOn
+#clearcoatBumpMapAmount
+
+=== IOR
+#baseIor
+#baseIorTexmap
+#baseIorTexmapOn
+#baseIorMapAmount
+
+=== Refraction
+#refractionAmount
+#refractionAmountTexmap
+#refractionAmountTexmapOn
+#refractionAmountMapAmount
+
+=== RefractionRoughness
+
+=== Emission
+#SELFILLUMCOLOR
+#selfIllumLevel
+#selfIllumTexmap
+#selfIllumTexmapOn
+#selfillumMapAmount
+
+=== EmissionStrength
+
+=== Opacity
+#opacityColor
+#opacityLevel
+#opacitytexmap
+#opacityTexmapOn
+#opacityMapAmount
+#opacityCutout
+
+=== Bump
+#baseBumpTexmap
+#baseBumpTexmapOn
+#baseBumpMapAmount
+
+=== Translucency
+#translucencyColor
+#translucencyColorTexmap
+#translucencyColorTexmapOn
+#translucencyColorMapAmount
+
+#translucencyFraction
+#translucencyFractionTexmap
+#translucencyFractionTexmapOn
+#translucencyFractionMapAmount
+
+=== Displacement
+#displacementMinimum
+#displacementMaximum
+#displacementWaterLevelOn
+#displacementWaterLevel
+#displacementTexmap
+#displacementTexmapOn
+
+#dispersionEnable
+#dispersion
+#useThinMode
+#useCaustics
+#volumetricAbsorptionColor
+#volumetricAbsorptionTexmap
+#volumetricAbsorptionTexmapOn
+#volumetricAbsorptionMapAmount
+#volumetricScatteringColor
+#volumetricScatteringTexmap
+#volumetricScatteringTexmapOn
+#volumetricScatteringMapAmount
+#attenuationDistance
+#scatterDirectionality
+#scatterSingleBounce
+#sssAmount
+#sssAmountTexmap
+#sssAmountTexmapOn
+#sssAmountMapAmount
+#sssRadius
+#sssRadiusTexmap
+#sssRadiusTexmapOn
+#sssRadiusMapAmount
+#sssScatterColor
+#sssScatterTexmap
+#sssScatterTexmapOn
+#sssScatterMapAmount
+#alphaMode
+#gBufferOverride
+#renderElementPropagation
+#materialLibraryId
+#bgOverrideReflectTexmap
+#bgOverrideReflectTexmapOn
+#bgOverrideRefractTexmap
+#bgOverrideRefractTexmapOn
+#thinAbsorptionColor
+#thinAbsorptionTexmap
+#thinAbsorptionTexmapOn
+#thinAbsorptionMapAmount
+#roughnessMode
+#preSet
+#edgeColor
+#edgeColorTexmap
+#edgeColorTexmapOn
+#edgeColorMapAmount
+#useComplexIor
+#complexIorNRed
+#complexIorNGreen
+#complexIorNBlue
+#complexIorKRed
+#complexIorKGreen
+#complexIorKBlue
+#iorMode
 
 
 VRayMtl

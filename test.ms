@@ -21,3 +21,25 @@ fn GetSceneMaterials = (
 for i in AllSceneMaterials do (
 	print i
 )
+
+scenefilename = maxfilepath + maxFileName
+
+fileassets = getMAXFileAssetMetadata scenefilename
+
+
+for i = 1 to AssetManager.GetNumAssets() do
+(
+	local AUIO = AssetManager.GetAssetByIndex i
+	local bm_id = AUIO.GetAssetId()
+	local bm_filename = AUIO.getfilename()
+	local bm_realPath = mapPaths.getFullFilePath(filenameFromPath bm_filename)
+	
+	for i in fileassets do (
+		if bm_id == i.assetid do (
+			fileassets.filename = bm_realPath
+		)
+	)	
+)
+
+setMAXFileAssetMetadata scenefilename fileassets
+gc()

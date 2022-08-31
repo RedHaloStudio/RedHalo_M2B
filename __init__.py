@@ -1,7 +1,7 @@
 bl_info = {  
-    "name": "REDHALO_IMPORT_MTL",  
+    "name": "REDHALO_IMPORT_MAX_SCENE",  
     "author": "Red Halo Studio",  
-    "version": (0, 2),  
+    "version": (0, 6),  
     "blender": (2, 80, 0),  
     "location": "View 3D > Tools > Red Halo Tools",  
     "description": "导入3ds Max材质",  
@@ -17,9 +17,10 @@ from bpy.types import Operator
 import colorsys
 import tempfile
 import os
-from mathutils import Matrix
+from mathutils import Matrix, Vector
 from xml.etree import ElementTree as xml
 from winreg import *
+import traceback
 
 def FixDaeName(string):
     # fbxname = "FBXASC231FBXASC170FBXASC151FBXASC229FBXASC184FBXASC152"
@@ -27,7 +28,7 @@ def FixDaeName(string):
     str = "".join(names)
     return str.encode("iso-8859-1").decode("utf-8")
 
-def getImportPath():
+def GetImportPath():
     # Reg Name in Windows
     RegRoot = ConnectRegistry(None, HKEY_CURRENT_USER)
     RegSubDir = "SOFTWARE\\REDHALO"
@@ -137,31 +138,34 @@ def CreateNode(nodes, links, xmlPath, ParentNode, texmap_type):
     #### ParentNode :父级节点
     #### type       :节点类型
     '''
-    texmap = xmlPath
-    
+    texmap = xmlPath    
     _node = texmap.findall("./")
     
     # Bitmap 已完成
     if texmap_type in ("Bitmap", "VRayBitmap") :
-        bitmap_path = _node[0].text        
-        # Scale
-        uTile = float(texmap.attrib["U_Tiling"])
-        vTile = float(texmap.attrib["V_Tiling"])
-        # Location
-        uOffset = float(texmap.attrib["U_Offset"])
-        vOffset = float(texmap.attrib["V_Offset"])
-        #Rotation
-        wAngle = float(texmap.attrib["W_Angle"])
-        vAngle = float(texmap.attrib["V_Angle"])
-        uAngle = float(texmap.attrib["U_Angle"])
-        
-        ImageShader = CreateImageNode(nodes, links, bitmap_path, -900, -150, position=(uOffset, vOffset, 0), rotation=(radians(uAngle), radians(vAngle), radians(wAngle)), scale=(uTile, vTile, 1))        
-        links.new(ImageShader.outputs["Color"], ParentNode)
+        bitmap_path = _node[0].text
+        if bitmap_path != "":            
+            # Scale
+            uTile = float(texmap.attrib["U_Tiling"])
+            vTile = float(texmap.attrib["V_Tiling"])
+            # Location
+            uOffset = float(texmap.attrib["U_Offset"])
+            vOffset = float(texmap.attrib["V_Offset"])
+            #Rotation
+            wAngle = float(texmap.attrib["W_Angle"])
+            vAngle = float(texmap.attrib["V_Angle"])
+            uAngle = float(texmap.attrib["U_Angle"])
+            # Mapping
+            mapping = int(texmap.attrib["Mapping"])
+            mappingtype = int(texmap.attrib["MappingType"])
+            
+            ImageShader = CreateImageNode(nodes, links, bitmap_path, position=(uOffset, vOffset, 0), rotation=(radians(uAngle), radians(vAngle), radians(wAngle)), scale=(uTile, vTile, 1), mapping=mapping, mappingtype=mappingtype)     
+            links.new(ImageShader.outputs["Color"], ParentNode)
     
     # 平铺 已完成
     elif texmap_type == "Tiles" :
         BrickShader = nodes.new("ShaderNodeTexBrick")
-        BrickShader.location = (-600, 0)
+        # BrickShader.location = p_loc - Vector((p_width + 100, 0))
         links.new(BrickShader.outputs["Color"], ParentNode)
 
         # 平铺纹理基础参数设置
@@ -185,7 +189,7 @@ def CreateNode(nodes, links, xmlPath, ParentNode, texmap_type):
         
         BrickShader.offset = Brick_offset
         
-        CreateUVMapping(nodes, links, BrickShader, -900, 300)
+        CreateUVMapping(nodes, links, BrickShader)
 
         # 判断分缝线有没有纹理，如果有创建相关节点
         if texmap.attrib["Mortar_Map"] != "undefined" :
@@ -202,37 +206,43 @@ def CreateNode(nodes, links, xmlPath, ParentNode, texmap_type):
             CreateNode(nodes, links, TileNode, BrickShader.inputs["Color2"], TileType)
 
     # 混合 已完成
-    elif texmap_type == "Mix" :
+    elif texmap_type in ("Mix", "RGB_Multiply", "CoronaMix", "RGB_Multiply", "VRayCompTex") :
+        #  #### Params : Color1 Color2 MixAmount Texmap1 Texmap2 TexmapMask MixMode
+        #  MixMode:
+        #  ADD SUBTRACT MULTIPLY DIVIDE MINIMUM MAXIMUM MIX GAMMA DIFFERENCE SCREEN OVERLAY COLORDODGE COLORBURN LINEARBURN LINEARLIGHT SOFTLIGHT HARDLIGHT VIVIDLIGHT PINLIGHT HARDMIX EXCLUSION
+
         MixShader = nodes.new("ShaderNodeMixRGB")
-        # MixShader.location = (-600, 0)
+        # MixShader.location = p_loc - Vector((p_width + 100, 0))
         links.new(MixShader.outputs["Color"], ParentNode)
 
         # 基础参数设置
-        amount = texmap.attrib["mixAmount"]
-        color1 = texmap.attrib["color1"]
-        color2 = texmap.attrib["color2"]
+        amount = texmap.attrib["MixAmount"]
+        color1 = texmap.attrib["Color1"]
+        color2 = texmap.attrib["Color2"]
         MixShader.inputs["Fac"].default_value = float(amount)/100
         MixShader.inputs["Color1"].default_value = ConvertColor(color1)
         MixShader.inputs["Color2"].default_value = ConvertColor(color2)
+        MixShader.blend_type = texmap.attrib["MixMode"]
 
-        if texmap.attrib["map1"] != "undefined":
+        if texmap.attrib["Texmap1"] != "undefined":
             map1Node = _node[0][0]
-            map1Type = texmap.attrib["map1"].split(":")[-1]
+            map1Type = texmap.attrib["Texmap1"].split(":")[-1]
             CreateNode(nodes, links, map1Node, MixShader.inputs["Color1"], map1Type)
 
-        if texmap.attrib["map2"] != "undefined":
+        if texmap.attrib["Texmap2"] != "undefined":
             map2Node = _node[1][0]
-            map2Type = texmap.attrib["map2"].split(":")[-1]
+            map2Type = texmap.attrib["Texmap2"].split(":")[-1]
             CreateNode(nodes, links, map2Node, MixShader.inputs["Color2"], map2Type)
 
-        if texmap.attrib["Mask"] != "undefined":
+        if texmap.attrib["TexmapMask"] != "undefined":
             maskNode = _node[2][0]
-            MaskType = texmap.attrib["Mask"].split(":")[-1]
+            MaskType = texmap.attrib["TexmapMask"].split(":")[-1]
             CreateNode(nodes, links, maskNode, MixShader.inputs["Fac"], MaskType)
 
     # 棋盘格  已完成
     elif texmap_type == "Checker":
         CheckerShader = nodes.new("ShaderNodeTexChecker")
+        # CheckerShader.location = p_loc - Vector((p_width + 100, 0))
         links.new(CheckerShader.outputs["Color"], ParentNode)
 
         #基础参数
@@ -255,7 +265,7 @@ def CreateNode(nodes, links, xmlPath, ParentNode, texmap_type):
             map2Type = map2.split(":")[-1]
             CreateNode(nodes, links, map2Node, CheckerShader.inputs["Color2"], map2Type)
         
-        CreateUVMapping(nodes, links, CheckerShader, -900, 300)
+        CreateUVMapping(nodes, links, CheckerShader)
 
     # 衰减  完成IOR部分，其它类型还没找到相应实现方式
     elif texmap_type == "Falloff":
@@ -282,54 +292,33 @@ def CreateNode(nodes, links, xmlPath, ParentNode, texmap_type):
         FresnelShader.inputs["IOR"].default_value = float(texmap.attrib["ior"])
 
     # 颜色校正节点 已完成
-    elif texmap_type == "Color Correction":
-
+    elif texmap_type in ("Color Correction","CoronaColorCorrect"):
+        # ### Params:
+        # #### Color Map Hue Saturation Brightness Contrast Gamma ColorMode
+        ###### ColorMode --> NORAML INVERT MONO
         cc_group = nodes.new("ShaderNodeGroup")
+        # cc_group.location = p_loc - Vector((p_width + 100, 0))
         cc_group.node_tree = bpy.data.node_groups['ColorCorrection_RH']
         links.new(cc_group.outputs["Color"], ParentNode)
 
-        cc_group.inputs["Color"].default_value = ConvertColor(texmap.attrib["color"])
+        cc_group.inputs["Color"].default_value = ConvertColor(texmap.attrib["Color"])
         
-        if texmap.attrib["rewireMode"] == "1":
+        if texmap.attrib["ColorMode"] == "MONO":
             cc_group.inputs["Saturation"].default_value = 0
-        elif texmap.attrib["rewireMode"] == "2":
+        elif texmap.attrib["ColorMode"] == "INVERT":
             cc_group.inputs["Invert"].default_value = 1
 
-        if texmap.attrib["LIGHTNESSMODE"] == "0":
-            cc_group.inputs["Bright"].default_value = float(texmap.attrib["BRIGHTNESS"])/100.0
-            cc_group.inputs["Contrast"].default_value = float(texmap.attrib["contrast"])/100.0
-        else:
-            cc_group.inputs["Gamma"].default_value = 1 / float(texmap.attrib["GAMMARGB"])
+        cc_group.inputs["Bright"].default_value = float(texmap.attrib["Brightness"])/100.0
+        cc_group.inputs["Contrast"].default_value = float(texmap.attrib["Contrast"])/100.0
+        cc_group.inputs["Gamma"].default_value = 1 / float(texmap.attrib["Gamma"])
 
-        cc_group.inputs["Hue"].default_value = float(texmap.attrib["HUESHIFT"])/360.0 + 0.5
-        cc_group.inputs["Saturation"].default_value = float(texmap.attrib["saturation"])/100.0 + 1
+        cc_group.inputs["Hue"].default_value = float(texmap.attrib["Hue"])/360.0 + 0.5
+        cc_group.inputs["Saturation"].default_value = float(texmap.attrib["Saturation"])/100.0 + 1
 
-        if texmap.attrib["map"] != "undefined" :
+        if texmap.attrib["Map"] != "undefined" :
             mapNode = _node[0][0]
-            mapType = texmap.attrib["map"].split(":")[-1]
+            mapType = texmap.attrib["Map"].split(":")[-1]
             CreateNode(nodes, links, mapNode, cc_group.inputs["Color"], mapType)
-
-    # 合成节点
-    # RGB相乘节点，Alpha处理部分没完成
-    elif texmap_type == "RGB Multiply" :
-        MixShader = nodes.new("ShaderNodeMixRGB")
-        links.new(MixShader.outputs["Color"], ParentNode)
-        MixShader.blend_type = "MULTIPLY"
-        MixShader.inputs["Fac"].default_value = 1
-        MixShader.inputs["Color1"].default_value = ConvertColor(texmap.attrib["color1"])
-        MixShader.inputs["Color2"].default_value = ConvertColor(texmap.attrib["color2"])
-
-        if texmap.attrib["map1"] != "undefined" :
-            map1Node = _node[0][0]
-            map1Type = texmap.attrib["map1"].split(":")[-1]
-            CreateNode(nodes, links, map1Node, MixShader.inputs["Color1"], map1Type)
-        
-        if texmap.attrib["map2"] != "undefined" :
-            map2Node = _node[1][0]
-            map2Type = texmap.attrib["map2"].split(":")[-1]
-            CreateNode(nodes, links, map2Node, MixShader.inputs["Color2"], map2Type)
-        
-        # Alpha处理
 
     # 渐变节点,Blender不支持贴图，所以只保留颜色
     elif texmap_type == "Gradient" :
@@ -341,9 +330,9 @@ def CreateNode(nodes, links, xmlPath, ParentNode, texmap_type):
         
         if texmap.attrib["gradientType"] == "1":
             GradientNode.gradient_type = "SPHERICAL"
-            CreateUVMapping(nodes, links, GradientNode, -900, 300, position=(-0.5, -0.5, -0.86))
+            CreateUVMapping(nodes, links, GradientNode, position=(-0.5, -0.5, -0.86))
         else:
-            CreateUVMapping(nodes, links, GradientNode, -900, 300, position=(-0.5, -0.5, 0))
+            CreateUVMapping(nodes, links, GradientNode, position=(-0.5, -0.5, 0))
 
         ColorRampNode.color_ramp.elements.new(float(texmap.attrib["color2Pos"]))
 
@@ -360,83 +349,81 @@ def CreateNode(nodes, links, xmlPath, ParentNode, texmap_type):
         links.new(GradientNode.outputs["Fac"], ColorRampNode.inputs["Fac"])
         links.new(ColorRampNode.outputs["Color"], ParentNode)
 
-    # 噪波节点
-    # VrayCompTex
-
-    elif texmap_type == "VRayDirt" :
-        
-        AONode = nodes.new("ShaderNodeAmbientOcclusion")
+    # AO
+    elif texmap_type in ("VRayDirt", "CoronaAO") : 
+        # Params Radius OccludedColor UnoccludedColor Subdivs OnlySameObject TexmapRadius TexmapOccluded TexmapUnoccluded Mode
+        # Mode : OUTSIDE INSIDE BOTH
         MixShader = nodes.new("ShaderNodeMixRGB")
+
+        AONode = nodes.new("ShaderNodeAmbientOcclusion")
+        AONode.location = MixShader.location - Vector((MixShader.width + 100, -100))
 
         links.new(AONode.outputs["AO"], MixShader.inputs["Fac"])
         links.new(MixShader.outputs["Color"], ParentNode)
 
-        AONode.inputs["Color"].default_value = ConvertColor(texmap.attrib["occluded_color"])
-        AONode.samples = int(texmap.attrib["subdivs"])
-        AONode.inputs["Distance"].default_value = float(texmap.attrib["radius"])
+        AONode.inputs["Color"].default_value = ConvertColor(texmap.attrib["OccludedColor"])
+        AONode.samples = int(texmap.attrib["Subdivs"])
+        AONode.inputs["Distance"].default_value = float(texmap.attrib["Radius"])
 
         MixShader.inputs["Color1"].default_value = (0, 0, 0, 1)
         MixShader.inputs["Color2"].default_value = (1, 1, 1, 1)
 
-        if texmap.attrib["consider_same_object_only"] == "false" :
+        if texmap.attrib["OnlySameObject"] == "false" :
             AONode.only_local = False
         else:
             AONode.only_local = True
         
-        if texmap.attrib["mode"] == "4":
+        if texmap.attrib["Mode"] == "INSIDE":
             AONode.inside = True
         else:
             AONode.inside = False
 
-        if texmap.attrib["texmap_occluded_color"] != "undefined":
+        if texmap.attrib["TexmapOccluded"] != "undefined":
             OccludedMap = _node[0][0]
-            OccludedType = texmap.attrib["texmap_occluded_color"].split(":")[-1]
+            OccludedType = texmap.attrib["TexmapOccluded"].split(":")[-1]
             CreateNode(nodes, links, OccludedMap, MixShader.inputs["Color1"], OccludedType)
-        if texmap.attrib["texmap_unoccluded_color"] != "undefined":
-            UnoccludedMap = _node[1][0]
-            UnoccludedType = texmap.attrib["texmap_unoccluded_color"].split(":")[-1]
-            CreateNode(nodes, links, UnoccludedMap, MixShader.inputs["Color2"], UnoccludedType)
-        if texmap.attrib["texmap_radius"] != "undefined" :
-            RadiusMap = _node[2][0]
-            RadiusType = texmap.attrib["texmap_radius"].split(":")[-1]
-            CreateNode(nodes, links, RadiusMap, AONode.inputs[1], RadiusType)
-            # CreateNode(nodes, links, RadiusMap, AONode.inputs["Radius"], RadiusType)
-
-    elif texmap_type == "VRayColor2Bump":
-        BumpNode = nodes.new("ShaderNodeBump")        
-        links.new(BumpNode.outputs["Normal"], ParentNode)
-
-        BumpNode.inputs["Strength"].default_value = 0.1
-
-        if texmap.attrib["map"] != "undefined":
-            map = texmap[1][0]
-            map_type = texmap.attrib["map"].split(":")[-1]
-            CreateNode(nodes, links, map, BumpNode.inputs["Height"], map_type)
-
-    elif texmap_type == "VRayNormalMap":
-        BumpNode = nodes.new("ShaderNodeBump")        
-        links.new(BumpNode.outputs["Normal"], ParentNode)
-
-        BumpNode.inputs["Strength"].default_value = 0.1
-
-        if texmap.attrib["normal_map"] != "undefined" :
-            normal_map = texmap[0][0]
-            normal_map_type = texmap.attrib["normal_map"].split(":")[-1]
-            CreateNode(nodes, links, normal_map, BumpNode.inputs["Normal"], normal_map_type)
         
-        if texmap.attrib["bump_map"] != "undefined":
-            height_map = texmap[1][0]
-            height_map_type = texmap.attrib["bump_map"].split(":")[-1]
-            CreateNode(nodes, links, height_map, BumpNode.inputs["Height"], height_map_type)
+        if texmap.attrib["TexmapUnoccluded"] != "undefined":
+            UnoccludedMap = _node[1][0]
+            UnoccludedType = texmap.attrib["TexmapUnoccluded"].split(":")[-1]
+            CreateNode(nodes, links, UnoccludedMap, MixShader.inputs["Color2"], UnoccludedType)
 
-    elif texmap_type == "VRayBump2Normal":
-        BumpNode = nodes.new("ShaderNodeBump")
-        links.new(BumpNode.outputs["Normal"], ParentNode)
+        if texmap.attrib["TexmapRadius"] != "undefined" :
+            RadiusMap = _node[2][0]
+            RadiusType = texmap.attrib["TexmapRadius"].split(":")[-1]
+            CreateNode(nodes, links, RadiusMap, AONode.inputs[1], RadiusType)
 
-        if texmap.attrib["bump_map"] != "undefined" :
-            bump_map = texmap[0][0]
-            bump_map_type = texmap.attrib["bump_map"].split(":")[-1]
-            CreateNode(nodes, links, bump_map, BumpNode.inputs["Height"], bump_map_type)
+    # 法线/凹凸
+    elif texmap_type in ("VRayColor2Bump", "VRayNormalMap", "CoronaNormal", "VRayBump2Normal", "CoronaBumpConverter") :
+        '''
+        #### Params : NormalMap BumpMap BumpStrength NormalStrength FlipRed FilpGreen SweepRedGreen
+        '''
+        BumpNode = None
+        NormalNode = None
+
+        if texmap.attrib["NormalMap"] != "undefined" :
+            NormalNode = nodes.new("ShaderNodeNormalMap")
+            NormalNode.inputs["Strength"].default_value = 1.0 # float(texmap.attrib["NormalStrength"])
+
+            normal_map = texmap[0][0]
+            normal_map_type = texmap.attrib["NormalMap"].split(":")[-1]
+            CreateNode(nodes, links, normal_map, NormalNode.inputs["Color"], normal_map_type)
+
+        if texmap.attrib["BumpMap"] != "undefined" :
+            BumpNode = nodes.new("ShaderNodeBump")
+            BumpNode.inputs["Strength"].default_value = 0.2 #float(texmap.attrib["BumpStrength"])
+
+            Bump_Map = texmap[1][0]
+            Bump_Map_Type = texmap.attrib["BumpMap"].split(":")[-1]
+            CreateNode(nodes, links, Bump_Map, BumpNode.inputs["Height"], Bump_Map_Type)
+        
+        if BumpNode is None :
+            links.new(NormalNode.outputs["Normal"], ParentNode)
+        elif NormalNode is None:
+            links.new(BumpNode.outputs["Normal"], ParentNode)
+        else:
+            links.new(NormalNode.outputs["Normal"], BumpNode.inputs["Normal"])
+            links.new(BumpNode.outputs["Normal"], ParentNode)
 
     elif texmap_type == "Vertex Color" :
         VCNode = nodes.new("ShaderNodeAttribute")
@@ -445,34 +432,28 @@ def CreateNode(nodes, links, xmlPath, ParentNode, texmap_type):
         links.new(VCNode.outputs["Color"], ParentNode)
         pass
     
-    elif texmap_type == "CoronaAO":
-
-        pass
-    # CoronaAO
-
-def CreateUVMapping(nodes, links, ParentNode, node_x, node_y, Coords="UV", position=(0, 0, 0), rotation=(0, 0, 0), scale=(1, 1, 1)):
+def CreateUVMapping(nodes, links, ParentNode, Coords="UV", position=(0, 0, 0), rotation=(0, 0, 0), scale=(1, 1, 1)):
     '''
     #### Coords      :坐标,默认为 “UV”，参数列表:Generated, Normal, UV, Object, Camera, Window, Reflection
     #### position    :移动，默认为(0,0,0)
     #### rotation    :旋转角度
     #### scale       :缩放
     #### ParentNode  :父级节点
-    #### node_x      :节点X方向位置
-    #### node_y      :节点Y方向位置
     '''
     mapShader = nodes.new("ShaderNodeMapping")
-    mapShader.location = (node_x, node_y)
     links.new(mapShader.outputs["Vector"], ParentNode.inputs["Vector"])
+    
+    mapShader.location = ParentNode.location - Vector((ParentNode.width, 0))
 
     mapShader.inputs["Location"].default_value = position
     mapShader.inputs["Rotation"].default_value = rotation
     mapShader.inputs["Scale"].default_value = scale
 
     texcoordShader = nodes.new("ShaderNodeTexCoord")
-    texcoordShader.location = (node_x-200, node_y)
+
     links.new(texcoordShader.outputs[Coords], mapShader.inputs["Vector"])
 
-def CreateImageNode(nodes, links, bitmap, node_x, node_y, Coors="UV", position=(0, 0, 0), rotation=(0, 0, 0), scale=(1, 1, 1)):
+def CreateImageNode(nodes, links, bitmap, Coors="UV", position=(0, 0, 0), rotation=(0, 0, 0), scale=(1, 1, 1), mapping=0, mappingtype=0):
     '''
     #### bitmap      :图像路径
     #### Coords      :坐标,默认为 “UV”，参数列表:Generated, Normal, UV, Object, Camera, Window, Reflection
@@ -480,20 +461,30 @@ def CreateImageNode(nodes, links, bitmap, node_x, node_y, Coors="UV", position=(
     #### rotation    :旋转角度
     #### scale       :缩放
     #### ParentNode  :父级节点
-    #### node_x      :节点X方向位置
-    #### node_y      :节点Y方向位置
     '''
 
     _, filename = os.path.split(bitmap)
-    img = bpy_extras.image_utils.load_image(bitmap, check_existing=True)
-    ImageShader = nodes.new("ShaderNodeTexImage")
-    ImageShader.location = (node_x, node_y)
+    img = bpy_extras.image_utils.load_image(bitmap, check_existing=True)    
     
-    if img != None:
+    if img:        
+        if mappingtype == 1:
+            # Sphere Environ
+            if mapping == 0:
+                ImageShader = nodes.new("ShaderNodeTexEnvironment")
+        else:
+            ImageShader = nodes.new("ShaderNodeTexImage")
+    
         img.name = filename
         ImageShader.image = img
 
-        CreateUVMapping(nodes, links, ImageShader, node_x - 300, node_y, Coors, position, rotation, scale)
+        if mappingtype == 1:
+            # Sphere Environ
+            if mapping == 0:
+                CreateUVMapping(nodes, links, ImageShader, "Generated", position, rotation, scale)
+            if mapping == 3:
+                CreateUVMapping(nodes, links, ImageShader, "Window", position, rotation, scale)
+        else:
+            CreateUVMapping(nodes, links, ImageShader, "UV", position, rotation, scale)
 
     return ImageShader
 
@@ -505,72 +496,56 @@ def CreateSingleMtl(nodes, links, xmlPath):
     bsdfShader = nodes.new("ShaderNodeBsdfPrincipled")
     bsdfShader.location = (-300, 0)
     
-    NodeName = ("Diffuse", "Metallic", "Reflection", "Roughness", "Anisotropic", "AnisotropicRotation", "Sheen", "Coat", "CoatRoughness", "IOR", "Refraction", "RefractRoughness", "Emission", "EmissionStrength", "Opacity", "Bump", "Translucent", "Displacement")
-    inputName = ("Base Color", "Metallic", "Specular", "Roughness", "Anisotropic", "Anisotropic Rotation", "Sheen", "Clearcoat","Clearcoat Roughness", "IOR", "Transmission", "Transmission Roughness", "Emission", "Emission Strength", "Alpha", "Normal", "Translucent", "Displacement")
-    TextureClass = ("Bitmap", "Tiles", "Mix", "Falloff", "Color Correction", "RGB Multiply", "Gradient", "VRayDirt", "Gradient Ramp", "VRayColor2Bump", "VRayNormalMap", "VRayBump2Normal", "Vertex Color")
+    # NodeName = ("Diffuse", "Metallic", "Reflection", "Roughness", "Anisotropic", "AnisotropicRotation", "Sheen", "Coat", "CoatRoughness", "IOR", "Refraction", 
+    # "RefractRoughness", "Emission", "EmissionStrength", "Opacity", "Bump", "Translucent", "Displacement")
+    # inputName = ("Base Color", "Metallic", "Specular", "Roughness", "Anisotropic", "Anisotropic Rotation", "Sheen", "Clearcoat","Clearcoat Roughness", "IOR", "Transmission", 
+    # "Transmission Roughness", "Emission", "Emission Strength", "Alpha", "Normal", "Translucent", "Displacement")
+    
+    NodeName = ("Diffuse", "Metallic", "Reflection", "Roughness", "Anisotropic", "AnisotropicRotation", "Sheen", "Coat", "CoatRoughness", "IOR", "Refraction", "RefractRoughness", "Emission", "EmissionStrength", "Opacity", "Bump")
+    inputName = ("Base Color", "Metallic", "Specular", "Roughness", "Anisotropic", "Anisotropic Rotation", "Sheen", "Clearcoat", "Clearcoat Roughness", "IOR", "Transmission", "Transmission Roughness", "Emission", "Emission Strength", "Alpha", "Normal")
 
     useRoughness = xmlPath.attrib["useRoughness"]
 
+    #Diffuse #Metallic #Reflection #Anisotropic #AnisotropicRotation #Sheen #Coat #IOR #Refraction #RefractRoughness #Emission #EmissionStrength #Bump
     for path, input in zip(NodeName, inputName):
         node = xmlPath.find("./%s" % path)
 
-        texmap = node.attrib["Texmap"]
-        texmap_type = texmap.split(":")[-1]   
+        Default_Value = 1.0
+        if "Color" in node.attrib :
+            Default_Value = ConvertColor(node.attrib["Color"])
         
+        if "Amount" in node.attrib :
+            Default_Value = float(node.attrib["Amount"])
+        
+        texmap = node.attrib["Texmap"]
+        texmap_type = texmap.split(":")[-1]
         texmap_node = xmlPath.find("./%s/" % path)
 
-        default_value = None
-        
-        parent_node = None
-
-        if path == "Displacement":
-            pass
-        else:
-            if "Color" in node.attrib:
-                default_value = ConvertColor(node.attrib["Color"])
-                parent_node = bsdfShader.inputs[input]
-            if "Amount" in node.attrib:
-                default_value = float(node.attrib["Amount"])                
-                parent_node = bsdfShader.inputs[input]
-            
-            if (path == "Roughness" and useRoughness == "false"):
-                default_value = 1 - default_value
+        parent_node = bsdfShader.inputs[input]        
+        if path in ("Roughness", "CoatRoughness", "RefractRoughness") :
+            if useRoughness == "false" or path == "RefractRoughness":
+                parent_node.default_value = 1 - Default_Value
                 if texmap_node:
                     InvertNode = nodes.new("ShaderNodeInvert")
-                    links.new(InvertNode.outputs["Color"], bsdfShader.inputs[input])
-
-                    parent_node = InvertNode.inputs["Color"]
-            elif path == "Bump":
-                if texmap_type in ("Bitmap", "Tiles", "Mix", "Falloff", "Color Correction", "RGB Multiply", "Gradient", "VRayDirt", "Gradient Ramp", "VRayBitmap") :
-                    bumpShader = nodes.new("ShaderNodeBump")
-                    bumpShader.inputs["Strength"].default_value = 0.3
-                    links.new(bumpShader.outputs["Normal"], bsdfShader.inputs["Normal"])
-
-                    parent_node = bumpShader.inputs["Height"]
-                else :
-                    NormapShader = nodes.new("ShaderNodeNormalMap")
-                    parent_node = NormapShader.inputs["Color"]
-            elif path == "Opacity":
-                default_value = default_value / 100
-
-            # 设置默认值
-            if path in ("Bump", "Translucent"):
-                pass
-            else:
-                bsdfShader.inputs[input].default_value = default_value
-        
-            # 添加节点            
+                    links.new(InvertNode.outputs["Color"], parent_node)
+                    CreateNode(nodes, links, texmap_node, InvertNode.inputs["Color"], texmap_type)
+        elif path in ("Bump"):
             if texmap_node:
-                # print(input)
-                # print(texmap_node)
+                BumpNode = nodes.new("ShaderNodeBump")
+                BumpNode.inputs["Strength"].default_value = 0.2
+                links.new(BumpNode.outputs["Normal"], parent_node)
+                CreateNode(nodes, links, texmap_node, BumpNode.inputs["Height"], texmap_type)
+        else:
+            parent_node.default_value = Default_Value
+            if texmap_node:
                 CreateNode(nodes, links, texmap_node, parent_node, texmap_type)
-
+    
     return bsdfShader
 
 class RedHalo_M2B_ImportSetting(bpy.types.PropertyGroup):
-    # newfile :bpy.props.BoolProperty(name="New File", default=True, description = "New File")
     importSetting :bpy.props.BoolProperty(name="导入Max设置", default=True, description = "导入Max设置")
     importLight :bpy.props.BoolProperty(name="导入灯光", default=True, description = "导入灯光")
+    importEnvironment :bpy.props.BoolProperty(name="导入环境", default=True, description = "导入环境")
     importCamera :bpy.props.BoolProperty(name="导入相机", default=True)
     importAnimate :bpy.props.BoolProperty(name="导入动画", default=True)
     importProxy :bpy.props.BoolProperty(name="导入代理文件", default=True)
@@ -585,8 +560,8 @@ class Tools_OT_Max2Blender(Operator):
     
     def execute(self, context): 
         import_path = tempfile.gettempdir()
-        if getImportPath() != "":
-            import_path = getImportPath()
+        if GetImportPath() != "":
+            import_path = GetImportPath()
 
         MTLFile = tempfile.gettempdir() + "\\RH_M2B.xml"
         xml_file = xml.parse(MTLFile)
@@ -626,7 +601,7 @@ class Tools_OT_Max2Blender(Operator):
             try:
                 FBXFile = import_path + "\\RH_M2B.fbx"
                 use_anim = True if settings.importAnimate else False
-                bpy.ops.import_scene.fbx(filepath=FBXFile, use_custom_normals=False, use_custom_props=False, use_anim=use_anim)
+                bpy.ops.import_scene.fbx(filepath=FBXFile, use_custom_normals=False, use_custom_props=False, use_anim=use_anim, automatic_bone_orientation=True)
                 # bpy.ops.import_scene.fbx(filepath='', directory='', filter_glob='*.fbx', files=None, ui_tab='MAIN', 
                 # use_manual_orientation=False, global_scale=1.0, bake_space_transform=False, 
                 # use_custom_normals=True, use_image_search=True, 
@@ -636,6 +611,50 @@ class Tools_OT_Max2Blender(Operator):
                 # force_connect_children=False, automatic_bone_orientation=False, 
                 # primary_bone_axis='Y', secondary_bone_axis='X', 
                 # use_prepost_rot=True, axis_forward='-Z', axis_up='Y')
+
+                objects_list = xml_root.find("./ObjectList")
+
+                for obj in objects_list.findall("./*") :                    
+                    object_name = obj.attrib["name"]
+                    
+                    # bpy.context.object.hide_render = True
+                    object_Render = True if obj.attrib["Render"] == "true" else False
+                    
+                    # bpy.context.object.visible_camera = False
+                    object_camera = True if obj.attrib["Camera"] == "true" else False
+                    # bpy.context.object.visible_diffuse = False
+                    
+                    # bpy.context.object.visible_transmission = False
+                    # bpy.context.object.visible_glossy = False
+                    object_reflect = True if obj.attrib["Reflect"] == "true" else False
+                    
+                    # bpy.context.object.visible_shadow = False
+                    object_shadow = True if obj.attrib["Shadow"] == "true" else False
+                    
+                    # bpy.context.object.visible_volume_scatter = False
+                    object_atmospherics = True if obj.attrib["Atmospherics"] == "true" else False
+                    obj_scene = bpy.data.objects[object_name]
+                    
+                    obj_scene.hide_render = object_Render
+                    # befor 3.00
+                    if bpy.app.version < (3, 0, 0):
+                        obj_vis = obj_scene.cycles_visibility
+                        obj_vis.camera = object_camera
+                        # obj_vis.diffuse = False
+                        obj_vis.glossy = object_reflect
+                        obj_vis.transmission = object_reflect
+                        obj_vis.scatter = object_atmospherics
+                        obj_vis.shadow = object_shadow
+
+                    # 3.00 later
+                    else:
+                        obj_scene.visible_camera = object_camera
+                        # obj_scene.visible_diffuse = False
+                        obj_scene.visible_glossy = object_reflect
+                        obj_scene.visible_transmission = object_reflect
+                        obj_scene.visible_volume_scatter = object_atmospherics
+                        obj_scene.visible_shadow = object_shadow
+
             except:
                 return {'FINISHED'}
             
@@ -662,8 +681,9 @@ class Tools_OT_Max2Blender(Operator):
 
             for p in proxy_list:
                 proxy_source = p.attrib["name"]
-                proxy_count = int(p.attrib["count"])
-                source_obj_name = proxy_source[23:]
+
+                source_obj_name = proxy_source[10:]
+                # RHPROXYSOURCE_3E65CFD9252849E484B3DBAFBA1F63CF_objarchmodels58_005_00
                 _src_obj = bpy.data.objects[proxy_source]
                 me = bpy.data.objects[proxy_source].data
                 
@@ -677,15 +697,9 @@ class Tools_OT_Max2Blender(Operator):
                     item_name = item.attrib["name"]
                     item_matrix = ConvertMatrix(item.attrib["matrix"])
 
-                    if idx < 7000:
-                        _tmp_obj = bpy.data.objects.new(item_name, me)
-                        _tmp_obj.display_type = "BOUNDS"
-                        _tmp_obj.matrix_world = item_matrix * fac
-                    else:
-                        _tmp_obj = _tmp_empty_obj.copy()
-                        _tmp_obj.empty_display_type = "CUBE"
-                        _tmp_obj.matrix_world = item_matrix * fac
-                        _tmp_obj.empty_display_size = 1/fac
+                    _tmp_obj = bpy.data.objects.new(item_name, me)
+                    _tmp_obj.display_type = "BOUNDS"
+                    _tmp_obj.matrix_world = item_matrix * fac
 
                     # bpy.context.collection.objects.link(_tmp_obj)
                     proxy_col.objects.link(_tmp_obj)
@@ -737,15 +751,13 @@ class Tools_OT_Max2Blender(Operator):
 
             light_col = bpy.data.collections.new("Lights")
             Arch_Col.children.link(light_col)
-
             light_xml = xml_root.find("./LightList")
-            # c = light_xml.getchildren()
             for x in light_xml.findall("./*"):
-                light_name = x.attrib["name"]
-                matrix = ConvertMatrix(x.attrib["matrix"])
-
                 L_Type = x.attrib["type"]
+                light_name = "tmp_light_name"
+                color = ConvertColor(x.attrib["color"])
 
+                # print(x.attrib)
                 if L_Type in ("AREA", "DISK"):
                     light_data = bpy.data.lights.new(name="Light", type = "AREA")
                 else:
@@ -753,36 +765,83 @@ class Tools_OT_Max2Blender(Operator):
 
                 light_obj = bpy.data.objects.new(light_name, light_data)
                 light_obj.data.energy = float(x.attrib["multiplier"])
-                color = ConvertColor(x.attrib["color"])
                 light_obj.data.color = color[:-1]
+
                 if L_Type == "POINT":
-                    light_obj.data.shadow_soft_size = float(x.attrib["length"]) 
+                    light_obj.data.shadow_soft_size = 0.005 if float(x.attrib["length"]) * fac < 0.005 else float(x.attrib["length"]) * fac
                 elif L_Type == "AREA":
                     light_obj.data.shape = 'RECTANGLE'
-                    light_obj.data.size = float(x.attrib["length"]) * fac
-                    light_obj.data.size_y = float(x.attrib["width"]) * fac
+                    light_obj.data.size = 0.005 if float(x.attrib["length"]) * fac < 0.005 else float(x.attrib["length"]) * fac
+                    light_obj.data.size_y = 0.005 if float(x.attrib["width"]) * fac < 0.005 else float(x.attrib["width"]) * fac
                     light_obj.data.cycles.is_portal = True if x.attrib["portal"] == "true" else False
                 elif L_Type == "DISK":
                     light_obj.data.shape = 'DISK'
-                    light_obj.data.size = float(x.attrib["length"]) * fac
-                    light_obj.data.size_y = float(x.attrib["width"]) * fac
+                    light_obj.data.size = 0.005 if float(x.attrib["length"]) * fac < 0.005 else float(x.attrib["length"]) * fac
+                    light_obj.data.size_y = 0.005 if float(x.attrib["width"]) * fac < 0.005 else float(x.attrib["width"]) * fac
                     light_obj.data.cycles.is_portal = True if x.attrib["portal"] == "true" else False
                 elif L_Type == "SUN":
-                    light_obj.data.angle = 0.01
+                    light_obj.data.angle = 0.005
                 elif L_Type == "SPOT" :
                     pass
+                
+                for light in x.findall("./*") :
+                    matrix = ConvertMatrix(light.attrib["matrix"])
 
-                light_col.objects.link(light_obj)
+                    light_instance = light_obj.copy()
+                    light_instance.name = light.attrib["name"]
+                    light_instance.matrix_world = matrix * fac
+                    light_instance.scale *= 1 / fac
 
-                light_obj.matrix_world = matrix * fac
-                light_obj.scale *= 1 / fac
-
-                light_obj.visible_camera = True if x.attrib["invisible"] == "true" else False
-                light_obj.visible_diffuse = True if x.attrib["affectdiffuse"] == "true" else False
-                light_obj.visible_glossy = True if x.attrib["affectspecular"] == "true" else False
-                light_obj.visible_transmission = True if x.attrib["affectreflections"] == "true" else False
+                    light_instance.visible_camera = True if light.attrib["invisible"] == "true" else False
+                    light_instance.visible_diffuse = True if light.attrib["affectdiffuse"] == "true" else False
+                    light_instance.visible_glossy = True if light.attrib["affectspecular"] == "true" else False
+                    light_instance.visible_transmission = True if light.attrib["affectreflections"] == "true" else False
+                    
+                    light_col.objects.link(light_instance)
+                
+                #Delete Origin objects
+                bpy.data.objects.remove(light_obj)
 
             print("========= 灯光设置完成 Ended =========")
+
+        # 设置环境
+        '''
+        if settings.importEnvironment :
+            print("========= 加载环境设置 Loading... =========")
+
+            env_color = ConvertColor(xml_root.find("./Environment/Color").text)
+            env_intensity = float(xml_root.find("./Environment/Multiplier").text)
+            env_texmap = xml_root.find("./Environment/Texmap")
+
+            scene = bpy.context.scene
+            world = scene.world
+            world.use_nodes = True
+            nodes = world.node_tree.nodes
+            links = world.node_tree.links
+
+            # clear default nodes
+            nodes.clear()
+
+            # create input node
+            world_output_node = nodes.new("ShaderNodeOutputWorld")
+            world_output_node.location = (0, 0)
+
+            backgroud_node = nodes.new("ShaderNodeBackground")
+            backgroud_node.location = (-200, 0)
+            backgroud_node.inputs[0].default_value = env_color
+            backgroud_node.inputs[1].default_value = env_intensity
+
+            links.new(backgroud_node.outputs[0], world_output_node.inputs[0])
+
+            # create texmap node
+            if env_texmap :                
+                if env_texmap.attrib["Texmap"] != "undefined":
+                    texmap_type = env_texmap.attrib["Texmap"].split(":")[-1]
+                    CreateNode(nodes, links, env_texmap[0], backgroud_node.inputs[0], texmap_type)
+                
+            print("========= 环境设置完成 Ended =========")
+        
+        '''
 
         # 设置材质
         if settings.importMaterial :
@@ -791,37 +850,40 @@ class Tools_OT_Max2Blender(Operator):
             
             Create_ColorCorrection()
 
-            m_mat = xml_root.find("./MaterialList/")
-
             for mat in SceneMaterials:
                 material_name = mat.name
                 nodes = mat.node_tree.nodes
                 links = mat.node_tree.links
                 
+                mat.blend_method = "CLIP"
+                mat.shadow_method = "HASHED"
+
                 m = xml_root.find("./MaterialList/*/[@name='%s']" % material_name)
-
-                print(material_name)
-                if m :
-                    try:
-                        nodes.clear()
-                        outputShader = nodes.new("ShaderNodeOutputMaterial")
-
+                
+                try:
+                    nodes.clear()
+                    outputShader = nodes.new("ShaderNodeOutputMaterial")
+                    if hasattr(m, "tag"):
                         if m.tag == "DoubleSideMtl" :
                             DoubleMixShader = nodes.new("ShaderNodeMixShader")
                             links.new(DoubleMixShader.outputs["Shader"], outputShader.inputs["Surface"])
                             DoubleMixShader.location = (0, -150)
                             
-                            frontMtl = m.attrib["frontMtl"].split(":")[0]
-                            backMtl = m.attrib["backMtl"].split(":")[0]
-
+                            frontMtl = m.attrib["frontmtl"].split(":")[0]
+                            backMtl = m.attrib["backmtl"].split(":")[0]
+                            
                             if frontMtl != "undefined" :
                                 FMat = xml_root.find("./MaterialList/SingleMtl/[@name='%s']" % frontMtl)
                                 node = CreateSingleMtl(nodes, links, FMat)
                                 links.new(node.outputs["BSDF"], DoubleMixShader.inputs[1])
-                            if backMtl != "undefined" :
-                                back = xml_root.find("./MaterialList/SingleMtl/[@name='%s']" % backMtl)
-                                node = CreateSingleMtl(nodes, links, back)
-                                links.new(node.outputs["BSDF"], DoubleMixShader.inputs[2])
+                            
+                                if frontMtl == backMtl:
+                                    links.new(node.outputs["BSDF"], DoubleMixShader.inputs[2])
+                                else:
+                                    if backMtl != "undefined" :
+                                        back = xml_root.find("./MaterialList/SingleMtl/[@name='%s']" % backMtl)
+                                        node = CreateSingleMtl(nodes, links, back)
+                                        links.new(node.outputs["BSDF"], DoubleMixShader.inputs[2])
                             
                             translucency_color = ConvertColor(m.attrib["translucency"])
                             translucency_map = m.attrib["texmap_translucency"]
@@ -830,11 +892,17 @@ class Tools_OT_Max2Blender(Operator):
                             amount = colorsys.rgb_to_hsv(translucency_color[0], translucency_color[1], translucency_color[2])[2] * float(translucency_amount) / 100.0
 
                             DoubleMixShader.inputs["Fac"].default_value = amount * float(translucency_amount) / 100
-                                
+
+                            if translucency_map != "undefined":
+                                texmap_type = m.attrib["texmap_translucency"].split(":")[-1]
+                                CreateNode(nodes, links, m[0], DoubleMixShader.inputs["Fac"], texmap_type)
+                        
                         elif m.tag == "SingleMtl" :
                             node = CreateSingleMtl(nodes, links, m)
                             links.new(node.outputs["BSDF"], outputShader.inputs["Surface"])
                             
+                            # BUMP
+                            #
                             # TranslucecyNode
                             translucency_path = m.find("./Translucent")
                             if translucency_path.attrib["Texmap"] != "undefined" :
@@ -858,7 +926,7 @@ class Tools_OT_Max2Blender(Operator):
                                 texmap_type = Displacement_path.attrib["Texmap"].split(":")[-1]
 
                                 CreateNode(nodes, links, Displacement_path[0], DisplacementShader.inputs["Normal"], texmap_type)
-                            
+
                         elif m.tag == "LightMtl" :
                             emissionShader = nodes.new("ShaderNodeEmission")
                             
@@ -903,10 +971,10 @@ class Tools_OT_Max2Blender(Operator):
                                 CreateNode(nodes, links, m[1][0], mixTransShader.inputs["Fac"], texmap_type)
 
                         elif m.tag == "OverrideMtl" :
-
                             pass
-                    except:
-                        error_mat_list.append(material_name)
+                except Exception as ex:
+                    print(traceback.print_exc())
+                    error_mat_list.append(material_name)
 
         # 错误材质列表
         if len(error_mat_list) > 0:
@@ -932,21 +1000,22 @@ class VIEW3D_PT_RedHaloM3B(bpy.types.Panel):
     def draw(self, context):
         settings = context.scene.rh_m2b_settings
         layout = self.layout
-        version = "2022-02-27"
+        version = "2022-08-30"
 
         # layout.prop(settings, "newfile")
-        layout.label(text="当前版本：" + version , icon='QUESTION')
-        layout.label(text="使用此插件前", icon='ERROR')
-        layout.label(text="建议新的空场景", icon='ERROR')
+        layout.label(text = "当前版本：" + version , icon='QUESTION')
+        layout.label(text = "使用此插件前", icon='ERROR')
+        layout.label(text = "建议新的空场景", icon='ERROR')
         layout.prop(settings, "importSetting", icon='PREFERENCES')
         layout.prop(settings, "importCamera", icon='CAMERA_DATA')
+        layout.prop(settings, "importEnvironment", icon='WORLD_DATA')
         layout.prop(settings, "importLight", icon='LIGHT_DATA')
         layout.prop(settings, "importModel", icon='MESH_DATA')
         layout.prop(settings, "importProxy", icon='LINK_BLEND')
         layout.prop(settings, "importMaterial", icon='MATERIAL')
 
         row = layout.column(align=True)
-        row.scale_y = 1.5
+        row.scale_y = 1.8
         row.operator('redhalo.maxtoblender', icon='IMPORT',text = "Max to Blender")
 
 classes = (

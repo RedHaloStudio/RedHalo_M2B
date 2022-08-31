@@ -5,7 +5,7 @@
  * @Last Modified time: 2022-03-28 22:38:55
  */
 
- macroScript RedHalo_Tools
+ macroScript RedHalo_Tools_M2B
  category:"Red Halo"
  toolTip:"Red Halo Export2Blender"
 (
